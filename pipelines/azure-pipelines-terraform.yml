@@ -78,6 +78,7 @@ variables:
     value: 'azurerm-${{ parameters.targetEnv }}-oidc'
   - name: APPROVAL_ENV
     value: '${{ parameters.targetEnv }}-infra'
+  - group: prodgrp
 
   # Bootstrap Key Vault holding the Terraform backend coordinates for this env.
   # Created in advance per env (see docs/deployment-guide.md § 2). The service
@@ -157,14 +158,6 @@ stages:
         - task: TerraformInstaller@1
           inputs:
             terraformVersion: '$(TF_VERSION)'
-
-        - task: AzureKeyVault@2
-          displayName: 'Fetch backend config from $(BACKEND_KV_NAME)'
-          inputs:
-            azureSubscription: '$(SERVICE_CONNECTION)'
-            KeyVaultName: '$(BACKEND_KV_NAME)'
-            SecretsFilter: 'tfstate-rg,tfstate-sa,tfstate-container,tfstate-key'
-            RunAsPreJob: false
 
         - task: AzureCLI@2
           displayName: 'terraform init + plan'

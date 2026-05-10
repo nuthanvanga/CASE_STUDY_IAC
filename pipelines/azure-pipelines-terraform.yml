@@ -172,7 +172,7 @@ stages:
             workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform/envs/dev'
 
         - task: TerraformTaskV4@4
-          displayName: 'terraform init + plan'
+          displayName: 'terraform plan'
           inputs:
             provider: 'azurerm' 
             command: 'plan'

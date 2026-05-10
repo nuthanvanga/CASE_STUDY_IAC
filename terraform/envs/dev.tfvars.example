@@ -1,0 +1,48 @@
+# Copy to dev.tfvars and fill in real values.
+# terraform apply -var-file=envs/dev.tfvars
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+tenant_id       = "00000000-0000-0000-0000-000000000000"
+
+environment = "dev"
+location    = "uaenorth"
+name_prefix = "dev-uaen"
+
+# Hub-and-spoke addressing - must NOT overlap staging, prod or any on-prem range.
+hub_vnet_address_space   = ["10.30.0.0/16"]
+spoke_vnet_address_space = ["10.40.0.0/16"]
+
+aks_admin_group_object_ids = [
+  # "<aad-group-object-id-of-dev-admins>"
+]
+
+kv_admin_principal_ids = [
+  # "<service-principal-object-id-running-terraform>"
+]
+
+acr_geo_replication_locations = []
+
+appsvc_app_name       = "dev-uaen-app-api"
+appsvc_plan_sku       = "B1"
+appsvc_zone_redundant = false
+appsvc_worker_count   = 1
+
+log_retention_days = 30
+log_daily_quota_gb = 5
+
+storage_enable_file_endpoint  = false
+storage_enable_queue_endpoint = false
+storage_enable_table_endpoint = false
+storage_enable_dfs_endpoint   = false
+
+alert_email_receivers = [
+  "platform-dev@example.com"
+]
+
+tags = {
+  environment = "dev"
+  region      = "uae-north"
+  owner       = "platform-team"
+  cost_center = "eng-platform"
+  managed_by  = "terraform"
+}

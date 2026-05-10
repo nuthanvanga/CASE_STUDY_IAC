@@ -1,0 +1,24 @@
+# Local Terraform directories and lock files
+**/.terraform/
+**/.terraform.lock.hcl
+
+# Backend config and tfvars hold real secrets / subscription ids
+**/backend.hcl
+**/terraform.auto.tfvars
+**/terraform.tfvars
+**/*.auto.tfvars
+
+# Terraform state (we use remote state, but ignore local copies just in case)
+**/*.tfstate
+**/*.tfstate.*
+**/crash.log
+**/crash.*.log
+
+# Plan output
+**/*.tfplan
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

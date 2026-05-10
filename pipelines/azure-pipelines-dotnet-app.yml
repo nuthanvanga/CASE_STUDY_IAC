@@ -1,0 +1,261 @@
+###############################################################################
+# Azure DevOps Pipeline: Build .NET 8 app and deploy to Azure App Service
+#
+# Stages:
+#   - Build         : restore, SonarQube prepare, build, test (+ coverage),
+#                     SonarQube analyze/publish, publish, package
+#   - DeployStaging : deploy ZIP to the App Service "staging" slot, smoke test
+#   - SwapToProd    : slot swap to production (manual approval)
+#
+# Auth: Workload Identity Federation via per-env service connections
+# (azurerm-<env>-oidc). No long-lived secrets in the pipeline.
+#
+# The same pipeline targets any env — pick one at queue time via `targetEnv`.
+###############################################################################
+
+parameters:
+  - name: targetEnv
+    displayName: 'Target environment'
+    type: string
+    default: 'dev'
+    values:
+      - dev
+      - staging
+      - prod
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - src/**
+      - pipelines/azure-pipelines-dotnet-app.yml
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - src/**
+
+variables:
+  - name: BUILD_CONFIG
+    value: 'Release'
+  - name: DOTNET_VERSION
+    value: '8.0.x'
+  - name: APP_PROJECT
+    value: 'src/Api/Api.csproj'
+  - name: TEST_PROJECT
+    value: 'src/Api.Tests/Api.Tests.csproj'
+  - name: STAGING_SLOT
+    value: 'staging'
+
+  # Per-env values. Naming follows: <env>-uaen-app-api / rg-<env>-uaen-platform.
+  - name: targetEnv
+    value: ${{ parameters.targetEnv }}
+  - name: AZURE_SERVICE_CONNECTION
+    value: 'azurerm-${{ parameters.targetEnv }}-oidc'
+  - name: APP_NAME
+    value: '${{ parameters.targetEnv }}-uaen-app-api'
+  - name: RESOURCE_GROUP
+    value: 'rg-${{ parameters.targetEnv }}-uaen-platform'
+  - name: STAGING_APPROVAL_ENV
+    value: '${{ parameters.targetEnv }}-app-staging'
+  - name: PROD_APPROVAL_ENV
+    value: '${{ parameters.targetEnv }}-app'
+
+  # SonarQube
+  - name: SONARQUBE_SERVICE_CONNECTION
+    value: 'sonarqube-${{ parameters.targetEnv }}'
+  - name: SONAR_PROJECT_KEY
+    value: '${{ parameters.targetEnv }}-uaen-app-api'
+  - name: SONAR_PROJECT_NAME
+    value: '${{ parameters.targetEnv }}-uaen-app-api'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+###############################################################################
+# Build and test
+###############################################################################
+- stage: Build
+  displayName: 'Build & Test'
+  jobs:
+    - job: build
+      displayName: 'Restore / Build / Test / Publish'
+      steps:
+        - checkout: self
+          fetchDepth: 1
+
+        - task: UseDotNet@2
+          displayName: 'Use .NET SDK $(DOTNET_VERSION)'
+          inputs:
+            packageType: 'sdk'
+            version: '$(DOTNET_VERSION)'
+
+        - task: DotNetCoreCLI@2
+          displayName: 'dotnet restore'
+          inputs:
+            command: 'restore'
+            projects: '**/*.csproj'
+            feedsToUse: 'select'
+
+        # SonarQube must run BEFORE the .NET build so the scanner can hook
+        # into MSBuild and instrument the compilation.
+        - task: SonarQubePrepare@5
+          displayName: 'SonarQube: prepare analysis'
+          inputs:
+            SonarQube: '$(SONARQUBE_SERVICE_CONNECTION)'
+            scannerMode: 'MSBuild'
+            projectKey: '$(SONAR_PROJECT_KEY)'
+            projectName: '$(SONAR_PROJECT_NAME)'
+            projectVersion: '$(Build.BuildNumber)'
+            extraProperties: |
+              sonar.cs.opencover.reportsPaths=$(Agent.TempDirectory)/**/coverage.opencover.xml
+              sonar.cs.vstest.reportsPaths=$(Agent.TempDirectory)/**/*.trx
+              sonar.coverage.exclusions=**/*Tests*/**,**/Program.cs,**/Migrations/**
+              sonar.exclusions=**/wwwroot/**,**/bin/**,**/obj/**
+
+        - task: DotNetCoreCLI@2
+          displayName: 'dotnet build'
+          inputs:
+            command: 'build'
+            projects: '**/*.csproj'
+            arguments: '--configuration $(BUILD_CONFIG) --no-restore'
+
+        - task: DotNetCoreCLI@2
+          displayName: 'dotnet test'
+          inputs:
+            command: 'test'
+            projects: '$(TEST_PROJECT)'
+            arguments: >
+              --configuration $(BUILD_CONFIG)
+              --no-build
+              --collect:"XPlat Code Coverage;Format=opencover,cobertura"
+              --logger trx
+              --results-directory $(Agent.TempDirectory)
+            publishTestResults: true
+
+        - task: SonarQubeAnalyze@5
+          displayName: 'SonarQube: run analysis'
+
+        - task: SonarQubePublish@5
+          displayName: 'SonarQube: publish quality gate'
+          inputs:
+            pollingTimeoutSec: '300'
+
+        - task: PublishCodeCoverageResults@2
+          condition: succeededOrFailed()
+          inputs:
+            summaryFileLocation: '$(Agent.TempDirectory)/**/coverage.cobertura.xml'
+
+        - task: DotNetCoreCLI@2
+          displayName: 'dotnet publish'
+          inputs:
+            command: 'publish'
+            projects: '$(APP_PROJECT)'
+            publishWebProjects: false
+            arguments: '--configuration $(BUILD_CONFIG) --no-build --output $(Build.ArtifactStagingDirectory)/app'
+            zipAfterPublish: true
+
+        # Optional: SCA / SAST scan (informational only)
+        - script: |
+            dotnet tool install --global dotnet-outdated-tool || true
+            export PATH="$PATH:$HOME/.dotnet/tools"
+            dotnet outdated --fail-on-updates false || true
+          displayName: 'Dependency check (informational)'
+
+        - publish: $(Build.ArtifactStagingDirectory)/app
+          artifact: dotnet-app
+          displayName: 'Publish artifact'
+
+###############################################################################
+# Deploy to staging slot, smoke test, swap to production
+###############################################################################
+- stage: DeployStaging
+  displayName: 'Deploy to staging slot ($(targetEnv))'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+    - deployment: deploy_staging
+      environment: '$(STAGING_APPROVAL_ENV)'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - download: current
+                artifact: dotnet-app
+
+              - task: AzureWebApp@1
+                displayName: 'Deploy ZIP to staging slot'
+                inputs:
+                  azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+                  appType: 'webAppLinux'
+                  appName: '$(APP_NAME)'
+                  deployToSlotOrASE: true
+                  resourceGroupName: '$(RESOURCE_GROUP)'
+                  slotName: '$(STAGING_SLOT)'
+                  package: '$(Pipeline.Workspace)/dotnet-app/*.zip'
+                  runtimeStack: 'DOTNETCORE|8.0'
+                  startUpCommand: ''
+
+              - task: AzureCLI@2
+                displayName: 'Smoke test staging slot'
+                inputs:
+                  azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+                  scriptType: bash
+                  scriptLocation: inlineScript
+                  inlineScript: |
+                    HOST="$(APP_NAME)-$(STAGING_SLOT).azurewebsites.net"
+                    for i in 1 2 3 4 5; do
+                      code=$(curl -s -o /dev/null -w "%{http_code}" "https://$HOST/health")
+                      echo "Attempt $i: HTTP $code"
+                      if [ "$code" = "200" ]; then exit 0; fi
+                      sleep 10
+                    done
+                    echo "Health check failed."
+                    exit 1
+
+- stage: SwapToProd
+  displayName: 'Swap staging -> production ($(targetEnv))'
+  dependsOn: DeployStaging
+  condition: succeeded()
+  jobs:
+    - deployment: swap
+      environment: '$(PROD_APPROVAL_ENV)'        # require approvers here
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - task: AzureCLI@2
+                displayName: 'Slot swap'
+                inputs:
+                  azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+                  scriptType: bash
+                  scriptLocation: inlineScript
+                  inlineScript: |
+                    az webapp deployment slot swap \
+                      --resource-group $(RESOURCE_GROUP) \
+                      --name $(APP_NAME) \
+                      --slot $(STAGING_SLOT) \
+                      --target-slot production
+
+              - task: AzureCLI@2
+                displayName: 'Post-swap verification'
+                inputs:
+                  azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+                  scriptType: bash
+                  scriptLocation: inlineScript
+                  inlineScript: |
+                    HOST="$(APP_NAME).azurewebsites.net"
+                    for i in 1 2 3 4 5; do
+                      code=$(curl -s -o /dev/null -w "%{http_code}" "https://$HOST/health")
+                      echo "Attempt $i: HTTP $code"
+                      if [ "$code" = "200" ]; then exit 0; fi
+                      sleep 10
+                    done
+                    echo "Production health check failed; consider rolling back."
+                    exit 1

@@ -1,0 +1,9 @@
+# LOCAL DEV ONLY. The Azure DevOps pipeline pulls these four values from the
+# bootstrap Key Vault `kv-tfstate-prod` (see docs/deployment-guide.md § 2).
+# Copy to prod.backend.hcl and fill in real values.
+# terraform init -backend-config=envs/prod.backend.hcl -reconfigure
+resource_group_name  = "rg-tfstate-prod"
+storage_account_name = "sttfstateproduaen"
+container_name       = "tfstate"
+key                  = "prod-uaen.tfstate"
+use_oidc             = true

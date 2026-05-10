@@ -163,9 +163,9 @@ stages:
           displayName: 'terraform init + plan'
           inputs:
             azureSubscription: 'azurerm-dev-oidc'
+            addSpnToEnvironment: true 
             scriptType: bash
             scriptLocation: inlineScript
-            addSpnToEnvironment: true
             inlineScript: |
               set -e
               cd $(WORKING_DIR)

@@ -2,8 +2,8 @@
 # Only the must-fill values are listed here -- env-specific defaults are baked
 # into variables.tf (override here if you need to deviate).
 
-subscription_id = "00000000-0000-0000-0000-000000000000"
-tenant_id       = "00000000-0000-0000-0000-000000000000"
+subscription_id = "6126332c-5b2e-46d0-bdbb-a09be68684db"
+tenant_id       = "8cf435b8-9c7e-4a00-bed7-f47d80d5509b"
 
 aks_admin_group_object_ids = [
   # "<aad-group-object-id-of-dev-admins>"

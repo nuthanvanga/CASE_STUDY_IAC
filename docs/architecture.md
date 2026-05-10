@@ -46,6 +46,158 @@ into the same hub without re-IP'ing.
 - **Blast-radius isolation.** Workloads (AKS / App Service / KV / Storage) live in spoke subnets that are independently NSG'd. New environments (dev, dr, partner) become new spokes without touching the hub.
 - **No transitive peering.** Spoke ↔ spoke goes via a hub NVA / firewall, which is the recommended Azure pattern. The peering on the hub side has `allow_gateway_transit` ready, the spoke side has `allow_forwarded_traffic` enabled.
 
+## Request flow — how a request reaches AKS
+
+The path below traces a single HTTPS request from a public client to a pod
+serving the `orders-api` microservice in the `orders` namespace, then the
+pod's outbound calls to Azure PaaS.
+
+```
+                                  Internet
+                                     │
+                ┌────────────────────▼────────────────────┐
+            (1) │ Public DNS: orders.example.com →        │
+                │              <AppGW Public IP>          │
+                └────────────────────┬────────────────────┘
+                                     │  TLS 1.2+ on 443
+                                     ▼
+       ┌─────────────────────────────────────────────────────┐
+   (2) │ Application Gateway WAF v2  — snet-appgw            │
+       │   • Standard zone-redundant Public IP               │
+       │   • TLS termination (cert from Key Vault)           │
+       │   • WAF (OWASP Core Rule Set)                       │
+       │   • Routing rule: host / path  →  backend pool      │
+       └─────────────────────────┬───────────────────────────┘
+                                 │  HTTPS to NGINX Internal LB IP
+                                 ▼
+       ┌─────────────────────────────────────────────────────┐
+   (3) │ Internal Azure Load Balancer  — snet-aks            │
+       │   • k8s Service type=LoadBalancer (internal)        │
+       │   • Fronts the ingress-nginx controller pods        │
+       │   • Health probe: GET /healthz on the controller    │
+       └─────────────────────────┬───────────────────────────┘
+                                 │
+                                 ▼
+       ┌─────────────────────────────────────────────────────┐
+   (4) │ NGINX Ingress Controller  (in AKS)                  │
+       │   • Second TLS terminate (cert-manager + LetsEncrypt│
+       │     issuer; cert in Secret orders-api-tls)          │
+       │   • Force HTTPS + HSTS                              │
+       │   • Rate limit (100 RPS), security headers          │
+       │   • Host orders.example.com → Service orders-api    │
+       └─────────────────────────┬───────────────────────────┘
+                                 │  ClusterIP service :80 → :8080
+                                 │  kube-proxy / Cilium dataplane
+                                 ▼
+       ┌─────────────────────────────────────────────────────┐
+   (5) │ NetworkPolicy `orders-api`  (orders namespace)      │
+       │   • Ingress: only from ns=ingress-nginx, TCP/8080   │
+       │   • Egress:  DNS (UDP/53) + 443 (KV/ACR/Storage)    │
+       │   • Everything else is denied                       │
+       └─────────────────────────┬───────────────────────────┘
+                                 │
+                                 ▼
+       ┌─────────────────────────────────────────────────────┐
+   (6) │ orders-api Pod  (one of N replicas, spread on 3 AZs)│
+       │   • Container :8080 (.NET 8)                        │
+       │   • Non-root (uid 10001), read-only root FS,        │
+       │     dropped capabilities, seccomp RuntimeDefault    │
+       │   • SA `orders-api-sa` annotated with UAMI          │
+       │     client id (Workload Identity)                   │
+       │   • Secrets mounted via CSI Secrets Store at        │
+       │     /mnt/secrets-store + projected env vars         │
+       └─────────────────────────┬───────────────────────────┘
+                                 │  pod outbound (when needed)
+                                 ▼
+       ┌─────────────────────────────────────────────────────┐
+   (7) │ Private endpoints in snet-pe                        │
+       │   • DNS resolves orders-kv.vault.azure.net etc.     │
+       │     to the PE private IP via the central Private    │
+       │     DNS zones in the hub                            │
+       │   • Workload Identity → AAD token → KV / ACR /      │
+       │     Storage authorise via RBAC                      │
+       │   • Traffic stays inside the VNet                   │
+       └─────────────────────────────────────────────────────┘
+
+       ┌─────────────────────────────────────────────────────┐
+   (8) │ Egress to Internet (only if a pod calls outbound):  │
+       │   spoke subnets → NAT Gateway (zone-redundant) →    │
+       │   stable public IP. No SNAT-port exhaustion.        │
+       └─────────────────────────────────────────────────────┘
+```
+
+### Hop-by-hop notes
+
+1. **Public DNS** — `orders.example.com` is an A/CNAME record on a public
+   DNS zone (Azure DNS or external) pointing to the standard, zone-
+   redundant Public IP attached to App Gateway. Nothing else in the
+   platform has a public IP.
+2. **Application Gateway WAF v2** — first checkpoint. TLS terminates here
+   using a cert pulled from the workload Key Vault via a User-Assigned
+   Managed Identity. WAF (OWASP CRS) inspects the request; routing rules
+   match host/path and forward to the backend pool whose target is the
+   internal LB IP from step 3. AppGW diagnostic logs ship to the Log
+   Analytics workspace.
+3. **Internal Azure Load Balancer** — created automatically when the
+   `ingress-nginx` Service is provisioned with type `LoadBalancer` and
+   the `service.beta.kubernetes.io/azure-load-balancer-internal: "true"`
+   annotation. Its private IP lives in `snet-aks`. AppGW health probes
+   pass through to NGINX `/healthz`.
+4. **NGINX Ingress Controller** — second TLS termination so that cert
+   rotation and per-host policies are managed declaratively inside the
+   cluster (cert-manager + Let's Encrypt). Annotations from
+   [`ingress.yaml`](../kubernetes/ingress.yaml) enforce HSTS,
+   `X-Frame-Options`, `X-Content-Type-Options`, force-HTTPS and a
+   100 RPS rate limit. Routing matches `Host: orders.example.com` and
+   forwards to the `orders-api` Service.
+5. **NetworkPolicy** — the `orders` namespace is locked down to default-
+   deny via Pod Security Standards `restricted` plus an explicit
+   `NetworkPolicy`. Ingress is allowed only from the `ingress-nginx`
+   namespace on TCP/8080; egress is allowed only to kube-dns and to
+   TCP/443 (Azure private endpoints). This means if AppGW ever bypassed
+   the controller, the pods still wouldn't accept the connection.
+6. **Pod** — one of the HPA-scaled replicas (`min/max` per env in
+   [`values-prod.yaml`](../kubernetes/charts/orders-api/values-prod.yaml))
+   running on a node in one of three AZs. Pod-level hardening is in
+   `securityContext`; service-account-level identity is via Workload
+   Identity (federated UAMI annotated on the SA). Secrets are mounted
+   from KV at startup via the CSI Secrets Store driver and projected as
+   env vars (e.g. `ConnectionStrings__OrdersDb`). Rotation interval is
+   2 minutes — secrets refresh transparently.
+7. **Pod → PaaS (Key Vault, ACR, Storage)** — when the pod calls
+   `https://<vault>.vault.azure.net`, the cluster's CoreDNS forwards to
+   Azure DNS, which (because of the hub Private DNS zone link) returns
+   the **private** IP of the KV private endpoint in `snet-pe`. The
+   traffic never leaves the VNet. Authorisation is RBAC: the UAMI
+   federated to the pod's SA has `Key Vault Secrets User` on the vault.
+8. **Egress to Internet** — only used when a pod genuinely needs to call
+   an external service (e.g. payment provider). Spoke subnets are
+   associated with a zone-redundant NAT Gateway, so the egress IP is
+   stable and SNAT ports are pooled — no `kube-proxy` SNAT exhaustion
+   on busy nodes.
+
+### What's NOT on this path
+
+- **AKS API server**: private cluster, only accessible from the spoke
+  (or via an Azure Bastion in the hub). Pipelines reach it via
+  Workload Identity Federation through the OIDC service connection,
+  not via a hard-coded kubeconfig.
+- **App Service**: a separate north-south path (AppGW → App Service via
+  its private endpoint in `snet-pe`, or directly via its `*.azurewebsites.net`
+  hostname when public access is enabled). The request flow above is
+  AKS-only.
+
+### Where to look when something breaks
+
+| Symptom                          | First place to look                                     |
+| -------------------------------- | ------------------------------------------------------- |
+| Cert errors at the edge          | App Gateway listener / KV cert UAMI assignment           |
+| 502 from AppGW                   | AppGW backend health, NGINX LB private IP, NSG on `snet-aks` |
+| 502/504 from NGINX               | `kubectl -n orders get pods,endpoints,svc` and `kubectl logs` |
+| 403 mounting secrets             | UAMI federated credential subject, KV RBAC role          |
+| Pod can't resolve KV/ACR/Storage | Private DNS zone links to the spoke VNet                 |
+| Image pull failures              | AKS kubelet identity AcrPull role on ACR                 |
+
 ## High availability
 
 | Layer            | Decision                                                                 |

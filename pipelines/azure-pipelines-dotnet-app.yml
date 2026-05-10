@@ -10,7 +10,14 @@
 # Auth: Workload Identity Federation via per-env service connections
 # (azurerm-<env>-oidc). No long-lived secrets in the pipeline.
 #
-# The same pipeline targets any env — pick one at queue time via `targetEnv`.
+# The same pipeline targets any env -- pick one at queue time via `targetEnv`.
+#
+# Agent pools:
+#   Build always runs on Microsoft-hosted agents (no private network needed).
+#   DeployStaging / SwapToProd default to Microsoft-hosted but switch to a
+#   self-hosted pool inside the spoke VNet via `useSelfHostedAgents = true`.
+#   Use that when App Service public + SCM endpoints are disabled and the
+#   site is reachable only via private endpoint.
 ###############################################################################
 
 parameters:
@@ -22,6 +29,16 @@ parameters:
       - dev
       - staging
       - prod
+
+  - name: useSelfHostedAgents
+    displayName: 'Use self-hosted agents for Deploy/Swap (required when App Service is PE-only)'
+    type: boolean
+    default: false
+
+  - name: selfHostedPoolName
+    displayName: 'Self-hosted agent pool name'
+    type: string
+    default: 'aks-agents-uaen'
 
 trigger:
   branches:
@@ -74,15 +91,14 @@ variables:
   - name: SONAR_PROJECT_NAME
     value: '${{ parameters.targetEnv }}-uaen-app-api'
 
-pool:
-  vmImage: 'ubuntu-latest'
-
 stages:
 ###############################################################################
-# Build and test
+# Build and test (always Microsoft-hosted)
 ###############################################################################
 - stage: Build
   displayName: 'Build & Test'
+  pool:
+    vmImage: 'ubuntu-latest'
   jobs:
     - job: build
       displayName: 'Restore / Build / Test / Publish'
@@ -179,6 +195,13 @@ stages:
   displayName: 'Deploy to staging slot ($(targetEnv))'
   dependsOn: Build
   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  pool:
+    ${{ if parameters.useSelfHostedAgents }}:
+      name: ${{ parameters.selfHostedPoolName }}
+      demands:
+        - Agent.OS -equals Linux
+    ${{ else }}:
+      vmImage: 'ubuntu-latest'
   jobs:
     - deployment: deploy_staging
       environment: '$(STAGING_APPROVAL_ENV)'
@@ -223,6 +246,13 @@ stages:
   displayName: 'Swap staging -> production ($(targetEnv))'
   dependsOn: DeployStaging
   condition: succeeded()
+  pool:
+    ${{ if parameters.useSelfHostedAgents }}:
+      name: ${{ parameters.selfHostedPoolName }}
+      demands:
+        - Agent.OS -equals Linux
+    ${{ else }}:
+      vmImage: 'ubuntu-latest'
   jobs:
     - deployment: swap
       environment: '$(PROD_APPROVAL_ENV)'        # require approvers here

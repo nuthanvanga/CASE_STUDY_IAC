@@ -129,6 +129,73 @@ you don't want quality-gate enforcement.
 4. To use SonarCloud instead, swap the three pipeline tasks to
    `SonarCloudPrepare/Analyze/Publish@2`.
 
+## 3b. Agent pools
+
+Both pipelines expose two queue-time parameters:
+
+| Parameter             | Type    | Default              | Effect |
+| --------------------- | ------- | -------------------- | ------ |
+| `useSelfHostedAgents` | boolean | `false`              | When false, every stage uses Microsoft-hosted `ubuntu-latest`. When true, the network-touching stages use the self-hosted pool below. |
+| `selfHostedPoolName`  | string  | `aks-agents-uaen`    | Name of the self-hosted pool. Created in Azure DevOps → Project Settings → Agent pools. |
+
+### Which stages use which pool
+
+| Pipeline               | Stage          | When MS-hosted (default)                | When self-hosted (parameter on)         |
+| ---------------------- | -------------- | --------------------------------------- | --------------------------------------- |
+| `terraform`            | Validate       | always Microsoft-hosted                 | always Microsoft-hosted                 |
+| `terraform`            | Plan, Apply    | Microsoft-hosted                        | self-hosted pool                        |
+| `dotnet-app`           | Build          | always Microsoft-hosted                 | always Microsoft-hosted                 |
+| `dotnet-app`           | DeployStaging, SwapToProd | Microsoft-hosted                | self-hosted pool                        |
+
+Validate and Build never need private network access, so they stay
+Microsoft-hosted to keep CI minutes cheap.
+
+### When to switch to self-hosted
+
+Flip `useSelfHostedAgents = true` when **any** of these hold:
+
+- The bootstrap Key Vault `kv-tfstate-<env>` has public network access
+  disabled (private endpoint only) — `AzureKeyVault@2` from a
+  Microsoft-hosted IP can't reach it.
+- The Terraform state storage account is locked to a private endpoint —
+  `terraform init` can't reach the blob.
+- The App Service has both site and SCM endpoints behind private
+  endpoints — `AzureWebApp@1` ZIP deploy can't push to SCM publicly.
+- You add a later K8s deploy stage that runs `helm upgrade --install`
+  against the **private** AKS API server — kubectl/helm can't reach it
+  from a Microsoft-hosted agent.
+
+If none of those hold (lab / test subscriptions where PaaS resources
+remain publicly reachable, optionally IP-restricted), leave the default.
+
+### Setting up the self-hosted pool
+
+1. Provision a small Linux VMSS or AKS-hosted agent pool inside
+   `snet-agents` (a new subnet in the spoke VNet — not the AKS or PE
+   subnets). A `Standard_D2s_v5` VMSS with 2-3 instances is plenty for
+   most teams.
+2. NSG: outbound to Azure DevOps (`dev.azure.com`, region-specific
+   `*.visualstudio.com`), and to the private endpoints in `snet-pe`.
+3. Install the [Azure Pipelines self-hosted Linux agent](https://learn.microsoft.com/azure/devops/pipelines/agents/v2-linux)
+   on each instance and register it into a new pool (Project Settings →
+   **Agent pools** → New) named e.g. `aks-agents-uaen`.
+4. Bake or `cloud-init`-install on each agent:
+   - `azure-cli` (already installed by `AzureCLI@2` task on first run, but
+     pre-baking is faster)
+   - `terraform` (the `TerraformInstaller@1` task installs it per job)
+   - `helm`, `kubectl`, `kustomize` (only needed if you add K8s deploy
+     stages — pre-baked with [`asdf`](https://asdf-vm.com) or apt is fine)
+   - `unzip`, `curl`, `jq`, `python3` (for `tflint` / `tfsec` / `checkov`
+     install scripts in the Validate stage if you ever route it here)
+5. Grant the agent pool's service connection (or VM Managed Identity if
+   you use one) the same Azure RBAC the OIDC SP has — typically
+   `Contributor` on the workload RGs and `Storage Blob Data Contributor`
+   on the state storage account.
+
+> One pool per region, not per env. Envs are isolated by separate Azure
+> DevOps environments + service connections; agents inside the spoke VNet
+> can target any subscription they have credentials for.
+
 ## 4. Deploy the infrastructure
 
 The Terraform stack creates four resource groups: `rg-<prefix>-core`,

@@ -18,6 +18,14 @@
 #
 # Auth: Workload Identity Federation (OIDC) via per-env service connections.
 # No long-lived secrets in the pipeline.
+#
+# Agent pools:
+#   Validate runs on Microsoft-hosted agents (no private network needed).
+#   Plan / Apply default to Microsoft-hosted but can switch to a self-hosted
+#   pool inside the spoke VNet via `useSelfHostedAgents = true`. Use that
+#   when the bootstrap KV or state storage account is reachable only via
+#   private endpoint, or when running against a private AKS cluster from
+#   later helm/kubectl tasks.
 ###############################################################################
 
 parameters:
@@ -29,6 +37,16 @@ parameters:
       - dev
       - staging
       - prod
+
+  - name: useSelfHostedAgents
+    displayName: 'Use self-hosted agents for Plan/Apply (required when state KV or SA are PE-only)'
+    type: boolean
+    default: false
+
+  - name: selfHostedPoolName
+    displayName: 'Self-hosted agent pool name'
+    type: string
+    default: 'aks-agents-uaen'
 
 trigger:
   branches:
@@ -64,24 +82,17 @@ variables:
   # Bootstrap Key Vault holding the Terraform backend coordinates for this env.
   # Created in advance per env (see docs/deployment-guide.md § 2). The service
   # principal behind $(SERVICE_CONNECTION) needs "Key Vault Secrets User" on it.
-  #
-  # Expected secret names:
-  #   tfstate-rg        -> backend resource_group_name
-  #   tfstate-sa        -> backend storage_account_name
-  #   tfstate-container -> backend container_name
-  #   tfstate-key       -> backend blob key (state file path)
   - name: BACKEND_KV_NAME
     value: 'kv-tfstate-${{ parameters.targetEnv }}'
 
-pool:
-  vmImage: 'ubuntu-latest'
-
 stages:
 ###############################################################################
-# Validate stage - linting and security scans
+# Validate stage - linting and security scans (always Microsoft-hosted)
 ###############################################################################
 - stage: Validate
   displayName: 'Validate & Scan ($(targetEnv))'
+  pool:
+    vmImage: 'ubuntu-latest'
   jobs:
     - job: validate
       displayName: 'fmt / validate / tflint / tfsec / checkov'
@@ -130,6 +141,13 @@ stages:
   displayName: 'Terraform Plan ($(targetEnv))'
   dependsOn: Validate
   condition: succeeded()
+  pool:
+    ${{ if parameters.useSelfHostedAgents }}:
+      name: ${{ parameters.selfHostedPoolName }}
+      demands:
+        - Agent.OS -equals Linux
+    ${{ else }}:
+      vmImage: 'ubuntu-latest'
   jobs:
     - job: plan
       displayName: 'terraform plan'
@@ -173,10 +191,6 @@ stages:
                 -backend-config="use_oidc=true" \
                 -reconfigure
 
-              # subscription_id and tenant_id come from terraform.auto.tfvars,
-              # which the env folder ships as `terraform.auto.tfvars.example`.
-              # Either commit a CI-time tfvars (no secrets) or pass via -var
-              # below. Here we forward the SP-resolved subscription/tenant.
               terraform plan \
                 -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
                 -var "tenant_id=$ARM_TENANT_ID" \
@@ -199,10 +213,17 @@ stages:
   displayName: 'Terraform Apply ($(targetEnv))'
   dependsOn: Plan
   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  pool:
+    ${{ if parameters.useSelfHostedAgents }}:
+      name: ${{ parameters.selfHostedPoolName }}
+      demands:
+        - Agent.OS -equals Linux
+    ${{ else }}:
+      vmImage: 'ubuntu-latest'
   jobs:
     - deployment: apply
       displayName: 'terraform apply'
-      environment: '$(APPROVAL_ENV)'        # configure approvers / checks per env
+      environment: '$(APPROVAL_ENV)'
       strategy:
         runOnce:
           deploy:

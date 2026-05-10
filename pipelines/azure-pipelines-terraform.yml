@@ -159,46 +159,15 @@ stages:
           inputs:
             terraformVersion: '$(TF_VERSION)'
 
-        - task: AzureCLI@2
+        - task: TerraformTaskV4@4
           displayName: 'terraform init + plan'
           inputs:
-            azureSubscription: 'azurerm-dev-oidc'
-            addSpnToEnvironment: true 
-            scriptType: bash
-            scriptLocation: inlineScript
-            inlineScript: |
-              set -e
-              cd $(WORKING_DIR)
-
-              export ARM_USE_OIDC=true
-              export ARM_CLIENT_ID=$servicePrincipalId
-              export ARM_OIDC_TOKEN=$idToken
-              export ARM_TENANT_ID=$tenantId
-              export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-
-              terraform init \
-                -backend-config="resource_group_name=$(tfstate-rg)" \
-                -backend-config="storage_account_name=$(tfstate-sa)" \
-                -backend-config="container_name=$(tfstate-container)" \
-                -backend-config="key=$(tfstate-key)" \
-                -backend-config="use_oidc=true" \
-                -reconfigure
-
-              terraform plan \
-                -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
-                -var "tenant_id=$ARM_TENANT_ID" \
-                -out=tfplan \
-                -input=false \
-                -no-color | tee plan.txt
-
-        - publish: $(WORKING_DIR)/tfplan
-          artifact: tfplan-$(targetEnv)
-          displayName: 'Publish tfplan'
-
-        - publish: $(WORKING_DIR)/plan.txt
-          artifact: plan-text-$(targetEnv)
-          displayName: 'Publish plan summary'
-
+            provider: 'azurerm' 
+            command: 'init'
+            backendServiceArm: 'azurerm-dev-oidc'
+            backendAzureRmStorageAccountName: '$(tfstate-sa)'
+            backendAzureRmContainerName: '$(tfstate-container)'
+            backendAzureRmKey: '$(tfstate-key)'
 ###############################################################################
 # Apply stage - manual approval via environment, fetch backend, init, apply
 ###############################################################################

@@ -162,7 +162,7 @@ stages:
         - task: AzureCLI@2
           displayName: 'terraform init + plan'
           inputs:
-            azureSubscription: '$(SERVICE_CONNECTION)'
+            azureSubscription: 'azurerm-dev-oidc'
             scriptType: bash
             scriptLocation: inlineScript
             addSpnToEnvironment: true
@@ -233,7 +233,7 @@ stages:
               - task: AzureKeyVault@2
                 displayName: 'Fetch backend config from $(BACKEND_KV_NAME)'
                 inputs:
-                  azureSubscription: '$(SERVICE_CONNECTION)'
+                  azureSubscription: 'azurerm-dev-oidc'
                   KeyVaultName: '$(BACKEND_KV_NAME)'
                   SecretsFilter: 'tfstate-rg,tfstate-sa,tfstate-container,tfstate-key'
                   RunAsPreJob: false
@@ -241,7 +241,7 @@ stages:
               - task: AzureCLI@2
                 displayName: 'terraform init + apply'
                 inputs:
-                  azureSubscription: '$(SERVICE_CONNECTION)'
+                  azureSubscription: 'azurerm-dev-oidc'
                   scriptType: bash
                   scriptLocation: inlineScript
                   addSpnToEnvironment: true

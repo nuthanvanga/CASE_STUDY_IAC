@@ -1,0 +1,31 @@
+# Dev overrides
+replicaCount: 1
+
+ingress:
+  enabled: true
+  host: orders.dev.example.com
+
+hpa:
+  minReplicas: 1
+  maxReplicas: 4
+
+pdb:
+  minAvailable: 1
+
+persistence:
+  size: 10Gi
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+topologySpreadConstraints:
+  enabled: false
+
+env:
+  ASPNETCORE_URLS: "http://+:8080"
+  ASPNETCORE_ENVIRONMENT: "Development"

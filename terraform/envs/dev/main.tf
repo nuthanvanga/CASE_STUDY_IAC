@@ -1,14 +1,11 @@
 ###############################################################################
-# Hub-and-spoke Azure stack
+# Dev environment - hub-and-spoke Azure stack in UAE North.
 #
 # Topology:
 #   - Hub VNet  (rg-<prefix>-hub)        : shared services + central Private DNS
 #   - Spoke VNet (rg-<prefix>-spoke)     : workload network (AKS, App Svc, PEs)
 #   - Workloads (rg-<prefix>-platform)   : AKS, ACR, Key Vault, App Service,
 #                                          Storage - ALL attached to the spoke
-#
-# Environment differences (sizing, addressing, names) are driven entirely by
-# the per-env tfvars in envs/<env>.tfvars.
 ###############################################################################
 
 locals {
@@ -84,7 +81,7 @@ resource "azurerm_log_analytics_solution" "containers" {
 # Hub network (VNet + central Private DNS zones)
 ###############################################################################
 module "hub_network" {
-  source              = "./modules/hub_network"
+  source              = "../../modules/hub_network"
   name_prefix         = var.name_prefix
   location            = var.location
   resource_group_name = azurerm_resource_group.hub.name
@@ -96,7 +93,7 @@ module "hub_network" {
 # Spoke network (workload VNet, peered with hub, DNS-linked)
 ###############################################################################
 module "spoke_network" {
-  source                     = "./modules/spoke_network"
+  source                     = "../../modules/spoke_network"
   name_prefix                = var.name_prefix
   spoke_name                 = "workload"
   location                   = var.location
@@ -113,7 +110,7 @@ module "spoke_network" {
 # AKS - in the spoke
 ###############################################################################
 module "aks" {
-  source                     = "./modules/aks"
+  source                     = "../../modules/aks"
   cluster_name               = "aks-${var.name_prefix}"
   location                   = var.location
   resource_group_name        = azurerm_resource_group.platform.name
@@ -128,7 +125,7 @@ module "aks" {
 # ACR - private endpoint in the spoke (with AKS pull permission)
 ###############################################################################
 module "acr" {
-  source                     = "./modules/acr"
+  source                     = "../../modules/acr"
   name                       = local.acr_name
   location                   = var.location
   resource_group_name        = azurerm_resource_group.platform.name
@@ -143,7 +140,7 @@ module "acr" {
 # Key Vault - private endpoint in the spoke
 ###############################################################################
 module "keyvault" {
-  source                     = "./modules/keyvault"
+  source                     = "../../modules/keyvault"
   name                       = local.kv_name
   location                   = var.location
   resource_group_name        = azurerm_resource_group.platform.name
@@ -162,7 +159,7 @@ module "keyvault" {
 # App Service (.NET) - VNet-integrated into the spoke
 ###############################################################################
 module "appservice" {
-  source                     = "./modules/app_service"
+  source                     = "../../modules/app_service"
   app_name                   = var.appsvc_app_name
   location                   = var.location
   resource_group_name        = azurerm_resource_group.platform.name
@@ -183,7 +180,7 @@ module "appservice" {
 # Storage account - private endpoints in the spoke
 ###############################################################################
 module "storage" {
-  source                     = "./modules/storage"
+  source                     = "../../modules/storage"
   name                       = local.storage_name
   location                   = var.location
   resource_group_name        = azurerm_resource_group.platform.name

@@ -1,7 +1,7 @@
 # LOCAL DEV ONLY. The Azure DevOps pipeline pulls these four values from the
 # bootstrap Key Vault `kv-tfstate-dev` (see docs/deployment-guide.md § 2).
-# Copy to dev.backend.hcl and fill in real values.
-# terraform init -backend-config=envs/dev.backend.hcl -reconfigure
+# Copy to backend.hcl and fill in real values.
+# terraform init -backend-config=backend.hcl
 resource_group_name  = "rg-tfstate-dev"
 storage_account_name = "sttfstatedevuaen"
 container_name       = "tfstate"

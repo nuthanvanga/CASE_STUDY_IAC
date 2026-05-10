@@ -1,5 +1,5 @@
 ###############################################################################
-# Required - no defaults, must come from a tfvars file
+# Required - no defaults, must come from terraform.auto.tfvars
 ###############################################################################
 variable "subscription_id" {
   type        = string
@@ -11,28 +11,27 @@ variable "tenant_id" {
   description = "AAD tenant id."
 }
 
-variable "environment" {
-  type        = string
-  description = "Logical environment name (dev / staging / prod). Used in tags only."
-}
-
-variable "name_prefix" {
-  type        = string
-  description = "Short prefix for resource names. e.g. dev-uaen, stg-uaen, prod-uaen."
-}
-
 ###############################################################################
-# Region
+# Naming + region (env-specific defaults baked in)
 ###############################################################################
 variable "location" {
   type    = string
   default = "uaenorth"
 }
 
+variable "name_prefix" {
+  type    = string
+  default = "stg-uaen"
+}
+
 variable "tags" {
   type = map(string)
   default = {
-    managed_by = "terraform"
+    environment = "staging"
+    region      = "uae-north"
+    owner       = "platform-team"
+    cost_center = "eng-platform"
+    managed_by  = "terraform"
   }
 }
 
@@ -40,13 +39,13 @@ variable "tags" {
 # Hub-and-spoke addressing
 ###############################################################################
 variable "hub_vnet_address_space" {
-  type        = list(string)
-  description = "Hub VNet CIDR(s). Must not overlap other envs or on-prem."
+  type    = list(string)
+  default = ["10.50.0.0/16"]
 }
 
 variable "spoke_vnet_address_space" {
-  type        = list(string)
-  description = "Spoke VNet CIDR(s). Must not overlap other envs or on-prem."
+  type    = list(string)
+  default = ["10.60.0.0/16"]
 }
 
 ###############################################################################
@@ -73,12 +72,13 @@ variable "acr_geo_replication_locations" {
 # App Service
 ###############################################################################
 variable "appsvc_app_name" {
-  type = string
+  type    = string
+  default = "stg-uaen-app-api"
 }
 
 variable "appsvc_plan_sku" {
   type    = string
-  default = "B1"
+  default = "S1"
 }
 
 variable "appsvc_zone_redundant" {
@@ -88,7 +88,7 @@ variable "appsvc_zone_redundant" {
 
 variable "appsvc_worker_count" {
   type    = number
-  default = 1
+  default = 2
 }
 
 ###############################################################################
@@ -96,12 +96,12 @@ variable "appsvc_worker_count" {
 ###############################################################################
 variable "log_retention_days" {
   type    = number
-  default = 30
+  default = 60
 }
 
 variable "log_daily_quota_gb" {
   type    = number
-  default = 5
+  default = 20
 }
 
 ###############################################################################

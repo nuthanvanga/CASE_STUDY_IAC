@@ -13,7 +13,8 @@ terraform {
   }
 
   # Remote state in an Azure storage account.
-  # Initialise with: terraform init -backend-config=envs/<env>.backend.hcl
+  # Initialise with: terraform init -backend-config=backend.hcl
+  # (in CI the four backend coordinates are pulled from kv-tfstate-staging)
   backend "azurerm" {}
 }
 

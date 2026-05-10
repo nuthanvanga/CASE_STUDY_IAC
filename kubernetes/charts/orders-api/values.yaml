@@ -1,0 +1,146 @@
+###############################################################################
+# Default values for orders-api. Per-env files override these (values-dev.yaml,
+# values-staging.yaml, values-prod.yaml). Runtime-only values that should NOT
+# be committed (UAMI client id, KV name, image tag) are passed via --set.
+###############################################################################
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ---- Image -----------------------------------------------------------------
+image:
+  # Override at install time:
+  #   --set image.repository=$ACR_LOGIN_SERVER/orders-api --set image.tag=$BUILD_TAG
+  repository: REPLACE-WITH-ACR-LOGIN-SERVER/orders-api
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+revisionHistoryLimit: 5
+
+# ---- Namespace -------------------------------------------------------------
+namespace:
+  create: true
+  name: orders
+  podSecurityStandard: restricted
+
+# ---- Workload Identity / ServiceAccount ------------------------------------
+serviceAccount:
+  create: true
+  name: orders-api-sa
+  # Required: client ID of the User-Assigned Managed Identity federated to
+  # this ServiceAccount. Pass via --set at install time.
+  azureWorkloadIdentityClientId: ""
+
+# ---- Key Vault (Secrets Store CSI) -----------------------------------------
+keyVault:
+  enabled: true
+  # Required: workload Key Vault name (NOT the bootstrap KV). Pass via --set.
+  name: ""
+  # Required: AAD tenant id. Pass via --set.
+  tenantId: ""
+  cloudName: AzurePublicCloud
+  # Each entry mounts a KV secret AND projects it into a Kubernetes Secret
+  # under the given env-var name.
+  secrets:
+    - objectName: db-connection
+      key: ConnectionStrings__OrdersDb
+    - objectName: jwt-signing-key
+      key: Jwt__SigningKey
+
+# ---- Resources -------------------------------------------------------------
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "1Gi"
+
+# ---- Probes ----------------------------------------------------------------
+probes:
+  liveness:
+    path: /health/live
+    initialDelaySeconds: 20
+    periodSeconds: 20
+  readiness:
+    path: /health/ready
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  startup:
+    path: /health/live
+    failureThreshold: 30
+    periodSeconds: 5
+
+# ---- Env vars (non-secret) -------------------------------------------------
+env:
+  ASPNETCORE_URLS: "http://+:8080"
+  ASPNETCORE_ENVIRONMENT: "Production"
+
+# ---- Service ---------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+# ---- Persistent storage ----------------------------------------------------
+storageClass:
+  create: true
+  name: managed-premium-zrs
+  skuName: Premium_ZRS
+  cachingMode: ReadOnly
+  fsType: ext4
+  reclaimPolicy: Retain
+
+persistence:
+  enabled: true
+  storageClassName: managed-premium-zrs
+  accessMode: ReadWriteOnce
+  size: 20Gi
+
+# ---- Ingress (NGINX + cert-manager) ----------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  host: orders.example.com
+  tlsSecretName: orders-api-tls
+  clusterIssuer: letsencrypt-prod
+  annotations: {}
+
+# ---- HPA -------------------------------------------------------------------
+hpa:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  cpuTarget: 70
+  memoryTarget: 75
+  customMetrics:
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "200"
+
+# ---- PodDisruptionBudget ---------------------------------------------------
+pdb:
+  enabled: true
+  minAvailable: 1
+
+# ---- NetworkPolicy ---------------------------------------------------------
+networkPolicy:
+  enabled: true
+  ingressNamespaceSelector:
+    name: ingress-nginx
+
+# ---- Topology spread (multi-AZ scheduling) ---------------------------------
+topologySpreadConstraints:
+  enabled: false           # turn on for multi-zone clusters
+
+# ---- Monitoring annotations ------------------------------------------------
+monitoring:
+  prometheus:
+    scrape: true
+    path: /metrics
+    port: "8080"

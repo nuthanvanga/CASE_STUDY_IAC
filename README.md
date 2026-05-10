@@ -17,16 +17,18 @@ End-to-end Azure platform package for a containerised .NET workload in
 E:\CaseStudy2\
 ├── README.md
 ├── .gitignore
-├── terraform\                       # IaC (single root + per-env tfvars)
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   ├── providers.tf
+├── terraform\                         # IaC (per-env folders + shared modules)
 │   ├── envs\
-│   │   ├── dev.tfvars.example         /  dev.backend.hcl.example
-│   │   ├── staging.tfvars.example     /  staging.backend.hcl.example
-│   │   └── prod.tfvars.example        /  prod.backend.hcl.example
-│   └── modules\
+│   │   ├── dev\                        # dev root (own state, smaller SKUs)
+│   │   │   ├── main.tf
+│   │   │   ├── variables.tf
+│   │   │   ├── outputs.tf
+│   │   │   ├── providers.tf
+│   │   │   ├── backend.hcl.example
+│   │   │   └── terraform.auto.tfvars.example
+│   │   ├── staging\                    (same shape as dev)
+│   │   └── prod\                       (same shape as dev)
+│   └── modules\                        # shared, env-agnostic
 │       ├── hub_network\               # VNet + central Private DNS zones
 │       ├── spoke_network\             # peered spoke VNet + subnets
 │       ├── aks\                       # private AKS, zone-redundant
@@ -37,19 +39,30 @@ E:\CaseStudy2\
 ├── pipelines\
 │   ├── azure-pipelines-terraform.yml  # validate / plan / apply
 │   └── azure-pipelines-dotnet-app.yml # build / staging / swap
-├── kubernetes\                        # orders-api microservice manifests
-│   ├── namespace.yaml
-│   ├── storageclass.yaml
-│   ├── pvc.yaml
-│   ├── serviceaccount.yaml
-│   ├── secretproviderclass.yaml
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   ├── ingress.yaml
-│   ├── hpa.yaml
-│   ├── pdb.yaml
-│   ├── networkpolicy.yaml
-│   └── kustomization.yaml
+├── kubernetes\
+│   ├── charts\
+│   │   └── orders-api\               # Helm chart (recommended)
+│   │       ├── Chart.yaml
+│   │       ├── values.yaml             (defaults)
+│   │       ├── values-dev.yaml         (env overrides)
+│   │       ├── values-staging.yaml
+│   │       ├── values-prod.yaml
+│   │       └── templates\               (Deployment, Service, Ingress,
+│   │                                     HPA, PDB, NetPol, SA, SPC,
+│   │                                     StorageClass, PVC, Namespace)
+│   └── (flat manifests)              # kubectl/kustomize fallback
+│       ├── namespace.yaml
+│       ├── storageclass.yaml
+│       ├── pvc.yaml
+│       ├── serviceaccount.yaml
+│       ├── secretproviderclass.yaml
+│       ├── deployment.yaml
+│       ├── service.yaml
+│       ├── ingress.yaml
+│       ├── hpa.yaml
+│       ├── pdb.yaml
+│       ├── networkpolicy.yaml
+│       └── kustomization.yaml
 └── docs\
     ├── BOQ.md                         # Bill of Quantity (UAE North)
     ├── BOQ_UAE_North.xlsx
@@ -62,10 +75,10 @@ E:\CaseStudy2\
 
 | # | Requirement | Location |
 | - | ----------- | -------- |
-| 1 | Terraform modules for AKS, ACR, KV, App Service (HA, security, networking best practice) | [`terraform/modules/`](terraform/modules) — wired in [`terraform/main.tf`](terraform/main.tf) |
+| 1 | Terraform modules for AKS, ACR, KV, App Service (HA, security, networking best practice) | [`terraform/modules/`](terraform/modules) — wired per env in [`terraform/envs/<env>/main.tf`](terraform/envs/prod/main.tf) |
 | 2 | Azure DevOps CI/CD pipeline for Terraform | [`pipelines/azure-pipelines-terraform.yml`](pipelines/azure-pipelines-terraform.yml) |
 | 3 | Azure DevOps CI/CD pipeline for .NET app → App Service | [`pipelines/azure-pipelines-dotnet-app.yml`](pipelines/azure-pipelines-dotnet-app.yml) |
-| 4 | Kubernetes manifests (Deployment, Service, Ingress, HPA, StorageClass, PVC, +) | [`kubernetes/`](kubernetes) |
+| 4 | Kubernetes manifests (Deployment, Service, Ingress, HPA, StorageClass, PVC, +) — packaged as a Helm chart | [`kubernetes/charts/orders-api/`](kubernetes/charts/orders-api) (Helm) and [`kubernetes/`](kubernetes) (flat fallback) |
 | 5 | Bill of Quantity (UAE North, monitoring + security included) | [`docs/BOQ.md`](docs/BOQ.md) and [`docs/BOQ_UAE_North.xlsx`](docs/BOQ_UAE_North.xlsx) |
 
 For the architecture overview and a hands-on deployment walk-through see
@@ -74,24 +87,32 @@ For the architecture overview and a hands-on deployment walk-through see
 
 ## How environments work
 
-Single Terraform root module; environments are switched by passing a
-different `-var-file` and `-backend-config`. State for each env lives in
-its own Azure storage account.
+Each env (`dev`, `staging`, `prod`) is its own Terraform root under
+`terraform/envs/<env>/` with its own `main.tf`, `variables.tf`,
+`outputs.tf`, `providers.tf`. They all reference the shared modules at
+`terraform/modules/` via `../../modules/<name>`. State for each env
+lives in its own Azure storage account.
+
+`terraform.auto.tfvars` is auto-loaded — no `-var-file` flag needed.
+Env-specific defaults (CIDRs, SKUs, retention) are baked into each env's
+`variables.tf`; only the must-fill values like `subscription_id` /
+`tenant_id` go in `terraform.auto.tfvars`.
 
 **Pipeline (Azure DevOps)** — the four backend coordinates
 (`resource_group_name`, `storage_account_name`, `container_name`, `key`)
 are pulled from a per-env bootstrap Key Vault `kv-tfstate-<env>` via the
 `AzureKeyVault@2` task at init time. Nothing about the state location is
-hard-coded in the pipeline YAML or in source control. See
+hard-coded in the pipeline YAML or in source control. The pipeline picks
+the env folder via the `targetEnv` parameter at queue time. See
 [`docs/deployment-guide.md` § 2](docs/deployment-guide.md) for the
 one-time bootstrap commands.
 
-**Local** — either pull the same four values from the bootstrap KV with
-`az keyvault secret show` (recommended), or fill in a local
-`envs/<env>.backend.hcl` from the committed example (gitignored):
+**Local** — `cd` into the env folder, then either pull backend config
+from KV (recommended) or use a local `backend.hcl`:
 
 ```
-cd terraform
+cd terraform/envs/prod
+cp terraform.auto.tfvars.example terraform.auto.tfvars   # fill in real values
 
 # Option A: pull backend config from KV
 terraform init \
@@ -102,14 +123,15 @@ terraform init \
   -backend-config="use_oidc=true" -reconfigure
 
 # Option B: local backend.hcl
-terraform init -backend-config=envs/prod.backend.hcl -reconfigure
+cp backend.hcl.example backend.hcl
+terraform init -backend-config=backend.hcl -reconfigure
 
 # whole stack
-terraform plan  -var-file=envs/prod.tfvars
-terraform apply -var-file=envs/prod.tfvars
+terraform plan
+terraform apply
 
 # single resource
-terraform apply -var-file=envs/prod.tfvars -target=module.aks
+terraform apply -target=module.aks
 ```
 
 ### Per-env defaults
@@ -178,10 +200,20 @@ terraform apply -var-file=envs/prod.tfvars -target=module.aks
    cp terraform/envs/prod.backend.hcl.example terraform/envs/prod.backend.hcl
    ```
 4. **Run the Terraform pipeline** with `targetEnv = prod`.
-5. **Federate a UAMI** to the K8s ServiceAccount (§ 5) and substitute the
-   client id into `kubernetes/serviceaccount.yaml` +
-   `kubernetes/secretproviderclass.yaml`.
-6. **`kubectl apply -k kubernetes/`** to deploy `orders-api`.
+5. **Federate a UAMI** to the K8s ServiceAccount (§ 5).
+6. **Deploy `orders-api` with Helm** — pass UAMI client id, KV name,
+   tenant id, ACR repo + tag via `--set`:
+   ```
+   helm upgrade --install orders-api kubernetes/charts/orders-api \
+     --namespace orders --create-namespace \
+     -f kubernetes/charts/orders-api/values-prod.yaml \
+     --set serviceAccount.azureWorkloadIdentityClientId=$UAMI_CLIENT_ID \
+     --set keyVault.name=$KV_NAME \
+     --set keyVault.tenantId=$TENANT_ID \
+     --set image.repository=$ACR_LOGIN_SERVER/orders-api \
+     --set image.tag=$IMAGE_TAG \
+     --atomic --wait --timeout 5m
+   ```
 7. **Run the .NET pipeline** with `targetEnv = prod` to deploy the API to
    App Service via staging slot + swap.
 

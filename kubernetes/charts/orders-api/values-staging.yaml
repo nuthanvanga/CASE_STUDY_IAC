@@ -1,0 +1,31 @@
+# Staging overrides
+replicaCount: 2
+
+ingress:
+  enabled: true
+  host: orders.stg.example.com
+
+hpa:
+  minReplicas: 2
+  maxReplicas: 8
+
+pdb:
+  minAvailable: 1
+
+persistence:
+  size: 20Gi
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "750m"
+    memory: "768Mi"
+
+topologySpreadConstraints:
+  enabled: true
+
+env:
+  ASPNETCORE_URLS: "http://+:8080"
+  ASPNETCORE_ENVIRONMENT: "Staging"

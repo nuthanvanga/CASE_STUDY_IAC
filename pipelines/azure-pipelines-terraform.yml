@@ -1,13 +1,17 @@
 ###############################################################################
 # Azure DevOps Pipeline: Infrastructure (Terraform)
 #
-# Single root module at terraform/ with per-env tfvars at terraform/envs/.
+# Per-env Terraform stacks live under terraform/envs/<env>/. Each env has its
+# own main.tf / variables.tf / outputs.tf / providers.tf and references the
+# shared modules at terraform/modules/. The pipeline switches envs by
+# changing the working directory.
+#
 # Backend coordinates (rg / storage account / container / state-blob key) are
 # pulled from a per-env bootstrap Key Vault at init time -- nothing about the
 # state location is hard-coded in this YAML or in source control.
 #
 # Stages:
-#   - Validate : fmt, validate, tflint, tfsec, checkov
+#   - Validate : fmt, validate (no backend), tflint, tfsec, checkov
 #   - Plan     : fetch backend coords from KV -> init -> plan -> publish
 #   - Apply    : manual approval (Azure DevOps environment), download plan,
 #                fetch backend coords from KV -> init -> apply
@@ -46,24 +50,22 @@ pr:
 variables:
   - name: TF_VERSION
     value: '1.7.5'
-  - name: TF_ROOT
+  - name: TF_MODULES_ROOT
     value: '$(System.DefaultWorkingDirectory)/terraform'
-
-  # Per-env values resolved from the queue-time parameter.
   - name: targetEnv
     value: ${{ parameters.targetEnv }}
+  - name: WORKING_DIR
+    value: '$(System.DefaultWorkingDirectory)/terraform/envs/${{ parameters.targetEnv }}'
   - name: SERVICE_CONNECTION
     value: 'azurerm-${{ parameters.targetEnv }}-oidc'
   - name: APPROVAL_ENV
     value: '${{ parameters.targetEnv }}-infra'
-  - name: VAR_FILE
-    value: 'envs/${{ parameters.targetEnv }}.tfvars'
 
   # Bootstrap Key Vault holding the Terraform backend coordinates for this env.
   # Created in advance per env (see docs/deployment-guide.md § 2). The service
   # principal behind $(SERVICE_CONNECTION) needs "Key Vault Secrets User" on it.
   #
-  # Expected secret names (created by the bootstrap script):
+  # Expected secret names:
   #   tfstate-rg        -> backend resource_group_name
   #   tfstate-sa        -> backend storage_account_name
   #   tfstate-container -> backend container_name
@@ -76,10 +78,10 @@ pool:
 
 stages:
 ###############################################################################
-# Validate stage - linting and security scans (env-agnostic, no backend)
+# Validate stage - linting and security scans
 ###############################################################################
 - stage: Validate
-  displayName: 'Validate & Scan'
+  displayName: 'Validate & Scan ($(targetEnv))'
   jobs:
     - job: validate
       displayName: 'fmt / validate / tflint / tfsec / checkov'
@@ -93,10 +95,10 @@ stages:
 
         - script: terraform fmt -check -recursive
           displayName: 'terraform fmt -check'
-          workingDirectory: '$(TF_ROOT)'
+          workingDirectory: '$(TF_MODULES_ROOT)'
 
         - script: |
-            cd $(TF_ROOT)
+            cd $(WORKING_DIR)
             terraform init -backend=false
             terraform validate
           displayName: 'terraform init (no backend) + validate'
@@ -108,17 +110,17 @@ stages:
             tflint --init
             tflint --recursive
           displayName: 'tflint'
-          workingDirectory: '$(TF_ROOT)'
+          workingDirectory: '$(TF_MODULES_ROOT)'
 
         - script: |
             curl -sL https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 -o /usr/local/bin/tfsec
             chmod +x /usr/local/bin/tfsec
-            tfsec --soft-fail $(TF_ROOT)
+            tfsec --soft-fail $(TF_MODULES_ROOT)
           displayName: 'tfsec'
 
         - script: |
             pip install --quiet checkov
-            checkov -d $(TF_ROOT) --quiet --soft-fail
+            checkov -d $(TF_MODULES_ROOT) --quiet --soft-fail
           displayName: 'checkov'
 
 ###############################################################################
@@ -138,8 +140,6 @@ stages:
           inputs:
             terraformVersion: '$(TF_VERSION)'
 
-        # Pull Terraform backend coordinates from Key Vault. Secrets are
-        # exposed as pipeline (secret) variables of the same name.
         - task: AzureKeyVault@2
           displayName: 'Fetch backend config from $(BACKEND_KV_NAME)'
           inputs:
@@ -157,7 +157,7 @@ stages:
             addSpnToEnvironment: true
             inlineScript: |
               set -e
-              cd $(TF_ROOT)
+              cd $(WORKING_DIR)
 
               export ARM_USE_OIDC=true
               export ARM_CLIENT_ID=$servicePrincipalId
@@ -173,17 +173,22 @@ stages:
                 -backend-config="use_oidc=true" \
                 -reconfigure
 
+              # subscription_id and tenant_id come from terraform.auto.tfvars,
+              # which the env folder ships as `terraform.auto.tfvars.example`.
+              # Either commit a CI-time tfvars (no secrets) or pass via -var
+              # below. Here we forward the SP-resolved subscription/tenant.
               terraform plan \
-                -var-file=$(VAR_FILE) \
+                -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
+                -var "tenant_id=$ARM_TENANT_ID" \
                 -out=tfplan \
                 -input=false \
                 -no-color | tee plan.txt
 
-        - publish: $(TF_ROOT)/tfplan
+        - publish: $(WORKING_DIR)/tfplan
           artifact: tfplan-$(targetEnv)
           displayName: 'Publish tfplan'
 
-        - publish: $(TF_ROOT)/plan.txt
+        - publish: $(WORKING_DIR)/plan.txt
           artifact: plan-text-$(targetEnv)
           displayName: 'Publish plan summary'
 
@@ -211,8 +216,6 @@ stages:
               - download: current
                 artifact: tfplan-$(targetEnv)
 
-              # Pull backend coordinates from Key Vault for the apply job too
-              # (each job runs on a fresh agent, so secrets don't carry over).
               - task: AzureKeyVault@2
                 displayName: 'Fetch backend config from $(BACKEND_KV_NAME)'
                 inputs:
@@ -230,7 +233,7 @@ stages:
                   addSpnToEnvironment: true
                   inlineScript: |
                     set -e
-                    cd $(TF_ROOT)
+                    cd $(WORKING_DIR)
                     cp $(Pipeline.Workspace)/tfplan-$(targetEnv)/tfplan ./tfplan
 
                     export ARM_USE_OIDC=true

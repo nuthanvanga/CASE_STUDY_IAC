@@ -134,7 +134,12 @@ you don't want quality-gate enforcement.
 The Terraform stack creates four resource groups: `rg-<prefix>-core`,
 `rg-<prefix>-hub`, `rg-<prefix>-spoke`, `rg-<prefix>-platform`. Hub and
 spoke VNets must not overlap each other or any on-prem range — defaults
-are in each env's tfvars (see [README.md](../README.md)).
+are in each env's `variables.tf` (see [README.md](../README.md)).
+
+Each env (`dev`, `staging`, `prod`) is its own Terraform root under
+`terraform/envs/<env>/` with its own `main.tf`, `variables.tf`,
+`outputs.tf`, `providers.tf`. They all reference the shared modules at
+`terraform/modules/`.
 
 ### Option A — Pipeline (recommended)
 
@@ -149,17 +154,19 @@ are in each env's tfvars (see [README.md](../README.md)).
 
 ### Option B — Local
 
-Two ways to feed `terraform init` the backend coordinates locally.
+Each env folder is its own Terraform root. Run commands from inside
+the env folder; `terraform.auto.tfvars` is auto-loaded so no `-var-file`
+flag is needed.
 
-**B.1 — Pull from the same bootstrap Key Vault the pipeline uses** (no
-local file with state-location info):
+**B.1 — Pull backend coordinates from the same bootstrap Key Vault the
+pipeline uses** (no local file with state-location info):
 
 ```bash
 ENV=prod
 KV=kv-tfstate-$ENV
 
-cd terraform
-cp envs/${ENV}.tfvars.example envs/${ENV}.tfvars     # fill in real values
+cd terraform/envs/$ENV
+cp terraform.auto.tfvars.example terraform.auto.tfvars   # fill in real values
 
 terraform init \
   -backend-config="resource_group_name=$(az keyvault secret show --vault-name $KV --name tfstate-rg        --query value -o tsv)" \
@@ -169,27 +176,28 @@ terraform init \
   -backend-config="use_oidc=true" \
   -reconfigure
 
-terraform plan  -var-file=envs/${ENV}.tfvars
-terraform apply -var-file=envs/${ENV}.tfvars
+terraform plan
+terraform apply
 ```
 
 **B.2 — Use a local `backend.hcl`** (gitignored; convenient when working
 offline, but you maintain the file yourself):
 
 ```bash
-cd terraform
-cp envs/prod.backend.hcl.example envs/prod.backend.hcl   # fill in real values
-cp envs/prod.tfvars.example      envs/prod.tfvars        # fill in real values
+cd terraform/envs/prod
+cp backend.hcl.example           backend.hcl              # fill in real values
+cp terraform.auto.tfvars.example terraform.auto.tfvars   # fill in real values
 
-terraform init  -backend-config=envs/prod.backend.hcl -reconfigure
-terraform plan  -var-file=envs/prod.tfvars
-terraform apply -var-file=envs/prod.tfvars
+terraform init  -backend-config=backend.hcl -reconfigure
+terraform plan
+terraform apply
 ```
 
-To deploy a single resource (e.g. just AKS):
+**Targeting a single resource** (e.g. just AKS):
 
 ```bash
-terraform apply -var-file=envs/prod.tfvars -target=module.aks
+cd terraform/envs/prod
+terraform apply -target=module.aks
 ```
 
 Valid module addresses:
@@ -217,7 +225,7 @@ az identity federated-credential create \
   --subject system:serviceaccount:orders:orders-api-sa
 
 # 3. Grant Key Vault Secrets User on the workload vault
-KV_URI=$(terraform -chdir=terraform output -raw key_vault_uri)
+KV_URI=$(terraform -chdir=terraform/envs/$ENV output -raw key_vault_uri)
 KV_NAME=$(echo "$KV_URI" | sed 's|https://||;s|\..*||')
 KV_ID=$(az keyvault show -n $KV_NAME --query id -o tsv)
 
@@ -226,24 +234,72 @@ az role assignment create \
   --role "Key Vault Secrets User" --scope $KV_ID
 ```
 
-Substitute `$UAMI_CLIENT_ID` (and the KV name + tenant id) into:
-- `kubernetes/serviceaccount.yaml` — annotation
-- `kubernetes/secretproviderclass.yaml` — `clientID`, `keyvaultName`, `tenantId`
+Capture these three values for the Helm install in § 6:
 
-## 6. Deploy the microservice
+```bash
+TENANT_ID=$(az account show --query tenantId -o tsv)
+ACR_LOGIN_SERVER=$(terraform -chdir=terraform/envs/$ENV output -raw acr_login_server)
+
+echo "UAMI_CLIENT_ID=$UAMI_CLIENT_ID"
+echo "KV_NAME=$KV_NAME"
+echo "TENANT_ID=$TENANT_ID"
+echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER"
+```
+
+## 6. Deploy the microservice with Helm
+
+The chart at `kubernetes/charts/orders-api/` packages every manifest
+(Deployment, Service, Ingress, HPA, PDB, NetworkPolicy, ServiceAccount,
+SecretProviderClass, StorageClass, PVC, Namespace). Per-env values live
+in `values-<env>.yaml`; runtime values that should never be committed
+(`UAMI_CLIENT_ID`, `KV_NAME`, `TENANT_ID`, image repo + tag) are passed
+on the command line.
 
 ```bash
 az aks get-credentials -g $RG -n $CLUSTER
 
-kubectl apply -k kubernetes/
+# Validate the chart and render to inspect output (optional)
+helm lint kubernetes/charts/orders-api -f kubernetes/charts/orders-api/values-${ENV}.yaml
+helm template orders-api kubernetes/charts/orders-api \
+  -f kubernetes/charts/orders-api/values-${ENV}.yaml \
+  --set serviceAccount.azureWorkloadIdentityClientId=$UAMI_CLIENT_ID \
+  --set keyVault.name=$KV_NAME \
+  --set keyVault.tenantId=$TENANT_ID \
+  --set image.repository=$ACR_LOGIN_SERVER/orders-api \
+  --set image.tag=1.0.0 | less
+
+# Install / upgrade
+helm upgrade --install orders-api kubernetes/charts/orders-api \
+  --namespace orders --create-namespace \
+  -f kubernetes/charts/orders-api/values-${ENV}.yaml \
+  --set serviceAccount.azureWorkloadIdentityClientId=$UAMI_CLIENT_ID \
+  --set keyVault.name=$KV_NAME \
+  --set keyVault.tenantId=$TENANT_ID \
+  --set image.repository=$ACR_LOGIN_SERVER/orders-api \
+  --set image.tag=1.0.0 \
+  --atomic --wait --timeout 5m
 ```
 
 Watch the rollout:
 
 ```bash
-kubectl -n orders rollout status deploy/orders-api
-kubectl -n orders get hpa,svc,ing,pdb,pvc
+helm status orders-api -n orders
+kubectl -n orders rollout status deploy/orders-api-orders-api
+kubectl -n orders get hpa,svc,ing,pdb,pvc,sa
 ```
+
+Roll back if a release goes bad:
+
+```bash
+helm history  orders-api -n orders
+helm rollback orders-api <REVISION> -n orders
+```
+
+> The flat manifests under `kubernetes/` are kept as a kubectl/kustomize
+> alternative (`kubectl apply -k kubernetes/`) for cases where Helm isn't
+> available — but the Helm chart is the recommended path because it
+> packages per-env values, supports atomic rollback via `helm rollback`,
+> and matches the CI/CD pattern in pipelines.
 
 ## 7. Deploy the .NET app to App Service
 
@@ -281,8 +337,8 @@ kubectl -n orders get hpa,svc,ing,pdb,pvc
 ## 9. Tear-down (test environment only)
 
 ```bash
-cd terraform
-terraform destroy -var-file=envs/dev.tfvars
+cd terraform/envs/dev
+terraform destroy
 az group delete -n rg-tfstate-dev --yes --no-wait
 ```
 

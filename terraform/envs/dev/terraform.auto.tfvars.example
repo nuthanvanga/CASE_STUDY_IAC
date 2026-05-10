@@ -1,0 +1,29 @@
+# Copy to terraform.auto.tfvars (gitignored). Auto-loaded on `terraform plan/apply`.
+# Only the must-fill values are listed here -- env-specific defaults are baked
+# into variables.tf (override here if you need to deviate).
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+tenant_id       = "00000000-0000-0000-0000-000000000000"
+
+aks_admin_group_object_ids = [
+  # "<aad-group-object-id-of-dev-admins>"
+]
+
+kv_admin_principal_ids = [
+  # "<service-principal-object-id-running-terraform>"
+]
+
+alert_email_receivers = [
+  "platform-dev@example.com"
+]
+
+# Optional overrides (defaults in variables.tf):
+# location                 = "uaenorth"
+# name_prefix              = "dev-uaen"
+# hub_vnet_address_space   = ["10.30.0.0/16"]
+# spoke_vnet_address_space = ["10.40.0.0/16"]
+# appsvc_plan_sku          = "B1"
+# appsvc_worker_count      = 1
+# appsvc_zone_redundant    = false
+# log_retention_days       = 30
+# log_daily_quota_gb       = 5

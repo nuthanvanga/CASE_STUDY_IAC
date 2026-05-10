@@ -165,6 +165,7 @@ stages:
             provider: 'azurerm' 
             command: 'init'
             backendServiceArm: 'azurerm-dev-oidc'
+            backendAzureRmResourceGroupName: '$(tfstate-rg)'
             backendAzureRmStorageAccountName: '$(tfstate-sa)'
             backendAzureRmContainerName: '$(tfstate-container)'
             backendAzureRmKey: '$(tfstate-key)'

@@ -12,7 +12,7 @@ resource "azurerm_service_plan" "this" {
   resource_group_name    = var.resource_group_name
   location               = var.location
   os_type                = "Linux"
-  sku_name               = var.plan_sku           # P1v3 / P2v3 / P3v3 for prod
+  sku_name               = var.plan_sku # P1v3 / P2v3 / P3v3 for prod
   zone_balancing_enabled = var.zone_redundant
   worker_count           = var.zone_redundant ? max(var.worker_count, 3) : var.worker_count
   tags                   = var.tags
@@ -61,20 +61,20 @@ resource "azurerm_linux_web_app" "this" {
     dynamic "ip_restriction" {
       for_each = var.allowed_ip_rules
       content {
-        name        = ip_restriction.value.name
-        ip_address  = ip_restriction.value.cidr
-        action      = "Allow"
-        priority    = ip_restriction.value.priority
+        name       = ip_restriction.value.name
+        ip_address = ip_restriction.value.cidr
+        action     = "Allow"
+        priority   = ip_restriction.value.priority
       }
     }
   }
 
   app_settings = merge({
-    "WEBSITES_ENABLE_APP_SERVICE_STORAGE"   = "false"
-    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.this.connection_string
+    "WEBSITES_ENABLE_APP_SERVICE_STORAGE"        = "false"
+    "APPLICATIONINSIGHTS_CONNECTION_STRING"      = azurerm_application_insights.this.connection_string
     "ApplicationInsightsAgent_EXTENSION_VERSION" = "~3"
-    "ASPNETCORE_ENVIRONMENT"                = "Production"
-    "WEBSITE_RUN_FROM_PACKAGE"              = "1"
+    "ASPNETCORE_ENVIRONMENT"                     = "Production"
+    "WEBSITE_RUN_FROM_PACKAGE"                   = "1"
   }, var.app_settings)
 
   logs {

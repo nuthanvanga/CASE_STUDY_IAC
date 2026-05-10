@@ -8,23 +8,23 @@
 data "azurerm_client_config" "current" {}
 
 resource "azurerm_key_vault" "this" {
-  name                          = var.name
-  location                      = var.location
-  resource_group_name           = var.resource_group_name
-  tenant_id                     = data.azurerm_client_config.current.tenant_id
-  sku_name                      = "premium"
-  enabled_for_disk_encryption   = true
+  name                            = var.name
+  location                        = var.location
+  resource_group_name             = var.resource_group_name
+  tenant_id                       = data.azurerm_client_config.current.tenant_id
+  sku_name                        = "premium"
+  enabled_for_disk_encryption     = true
   enabled_for_template_deployment = true
-  enable_rbac_authorization     = true
-  purge_protection_enabled      = true
-  soft_delete_retention_days    = 90
-  public_network_access_enabled = false
-  tags                          = var.tags
+  enable_rbac_authorization       = true
+  purge_protection_enabled        = true
+  soft_delete_retention_days      = 90
+  public_network_access_enabled   = false
+  tags                            = var.tags
 
   network_acls {
-    default_action = "Deny"
-    bypass         = "AzureServices"
-    ip_rules       = var.allowed_ip_ranges
+    default_action             = "Deny"
+    bypass                     = "AzureServices"
+    ip_rules                   = var.allowed_ip_ranges
     virtual_network_subnet_ids = var.allowed_subnet_ids
   }
 }

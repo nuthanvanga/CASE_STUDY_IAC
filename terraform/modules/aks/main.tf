@@ -22,7 +22,7 @@ resource "azurerm_kubernetes_cluster" "this" {
   resource_group_name               = var.resource_group_name
   dns_prefix                        = var.cluster_name
   kubernetes_version                = var.kubernetes_version
-  sku_tier                          = "Standard"  # uptime SLA enabled
+  sku_tier                          = "Standard" # uptime SLA enabled
   node_resource_group               = "${var.resource_group_name}-nodes"
   private_cluster_enabled           = true
   private_dns_zone_id               = "System"
@@ -94,10 +94,10 @@ resource "azurerm_kubernetes_cluster" "this" {
   }
 
   auto_scaler_profile {
-    balance_similar_node_groups = true
-    expander                    = "least-waste"
+    balance_similar_node_groups  = true
+    expander                     = "least-waste"
     max_graceful_termination_sec = "600"
-    scale_down_unneeded         = "10m"
+    scale_down_unneeded          = "10m"
   }
 
   maintenance_window_auto_upgrade {

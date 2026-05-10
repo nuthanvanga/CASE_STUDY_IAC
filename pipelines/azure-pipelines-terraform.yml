@@ -169,6 +169,15 @@ stages:
             backendAzureRmStorageAccountName: '$(tfstate-sa)'
             backendAzureRmContainerName: '$(tfstate-container)'
             backendAzureRmKey: '$(tfstate-key)'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform/envs/dev'
+
+        - task: TerraformTaskV4@4
+          displayName: 'terraform init + plan'
+          inputs:
+            provider: 'azurerm' 
+            command: 'plan'
+            backendServiceArm: 'azurerm-dev-oidc'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform/envs/dev'
 ###############################################################################
 # Apply stage - manual approval via environment, fetch backend, init, apply
 ###############################################################################

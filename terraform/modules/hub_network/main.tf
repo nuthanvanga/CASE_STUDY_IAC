@@ -15,13 +15,26 @@ resource "azurerm_virtual_network" "hub" {
   tags                = var.tags
 }
 
+###############################################################################
+# Subnet CIDRs - derived from vnet_address_space[0] when not explicitly set.
+# Keeps the hub subnet plan in sync with whatever address space the env picks.
+###############################################################################
+locals {
+  vnet_prefix = var.vnet_address_space[0]
+
+  gateway_cidr  = coalesce(var.gateway_subnet_cidr, cidrsubnet(local.vnet_prefix, 11, 0))
+  firewall_cidr = coalesce(var.firewall_subnet_cidr, cidrsubnet(local.vnet_prefix, 10, 4))
+  bastion_cidr  = coalesce(var.bastion_subnet_cidr, cidrsubnet(local.vnet_prefix, 10, 8))
+  shared_cidr   = coalesce(var.shared_subnet_cidr, cidrsubnet(local.vnet_prefix, 8, 3))
+}
+
 # GatewaySubnet - reserved for ExpressRoute / VPN Gateway. Name is fixed by Azure.
 resource "azurerm_subnet" "gateway" {
   count                = var.create_gateway_subnet ? 1 : 0
   name                 = "GatewaySubnet"
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.hub.name
-  address_prefixes     = [var.gateway_subnet_cidr]
+  address_prefixes     = [local.gateway_cidr]
 }
 
 # AzureFirewallSubnet - reserved for Azure Firewall. Name is fixed by Azure.
@@ -30,7 +43,7 @@ resource "azurerm_subnet" "firewall" {
   name                 = "AzureFirewallSubnet"
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.hub.name
-  address_prefixes     = [var.firewall_subnet_cidr]
+  address_prefixes     = [local.firewall_cidr]
 }
 
 # AzureBastionSubnet - reserved for Azure Bastion. Name is fixed by Azure.
@@ -39,7 +52,7 @@ resource "azurerm_subnet" "bastion" {
   name                 = "AzureBastionSubnet"
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.hub.name
-  address_prefixes     = [var.bastion_subnet_cidr]
+  address_prefixes     = [local.bastion_cidr]
 }
 
 # Shared-services subnet (jumpboxes, DNS resolvers, monitoring relays, etc.)
@@ -47,7 +60,7 @@ resource "azurerm_subnet" "shared" {
   name                 = "snet-shared"
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.hub.name
-  address_prefixes     = [var.shared_subnet_cidr]
+  address_prefixes     = [local.shared_cidr]
 }
 
 ###############################################################################

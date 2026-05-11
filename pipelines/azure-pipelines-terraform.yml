@@ -221,30 +221,37 @@ stages:
                   SecretsFilter: 'tfstate-rg,tfstate-sa,tfstate-container,tfstate-key'
                   RunAsPreJob: false
 
-              - task: AzureCLI@2
-                displayName: 'terraform init + apply'
+              - task: TerraformTaskV4@4
+                displayName: 'terraform init'
                 inputs:
-                  azureSubscription: 'azurerm-dev-oidc'
-                  scriptType: bash
-                  scriptLocation: inlineScript
-                  addSpnToEnvironment: true
-                  inlineScript: |
-                    set -e
-                    cd $(WORKING_DIR)
-                    cp $(Pipeline.Workspace)/tfplan-$(targetEnv)/tfplan ./tfplan
+                  provider: 'azurerm' 
+                  command: 'init'
+                  backendServiceArm: '$(SERVICE_CONNECTION)'
+                  backendAzureRmResourceGroupName: 'rg-tfstate-$(targetEnv)'
+                  backendAzureRmStorageAccountName: 'sttfstate$(targetEnv)uaen'
+                  backendAzureRmContainerName: 'tfstate'
+                  backendAzureRmKey: '$(targetEnv)-uaen.tfstate'
+                  workingDirectory: '$(WORKING_DIR)'
 
-                    export ARM_USE_OIDC=true
-                    export ARM_CLIENT_ID=$servicePrincipalId
-                    export ARM_OIDC_TOKEN=$idToken
-                    export ARM_TENANT_ID=$tenantId
-                    export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-
-                    terraform init \
-                      -backend-config="resource_group_name=$(tfstate-rg)" \
-                      -backend-config="storage_account_name=$(tfstate-sa)" \
-                      -backend-config="container_name=$(tfstate-container)" \
-                      -backend-config="key=$(tfstate-key)" \
-                      -backend-config="use_oidc=true" \
-                      -reconfigure
-
-                    terraform apply -input=false -auto-approve tfplan
+              - task: TerraformTaskV4@4
+                displayName: 'terraform plan'
+                inputs:
+                  provider: 'azurerm' 
+                  command: 'plan'
+                  environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
+                  workingDirectory: '$(WORKING_DIR)'
+                  commandOptions: '-out=tfplan -input=false'
+                env:
+                  TF_VAR_subscription_id: '6126332c-5b2e-46d0-bdbb-a09be68684db'
+                  TF_VAR_tenant_id: '8cf435b8-9c7e-4a00-bed7-f47d80d5509b'
+              - task: TerraformTaskV4@4
+                displayName: 'terraform apply'
+                inputs:
+                  provider: 'azurerm' 
+                  command: 'apply'
+                  environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
+                  workingDirectory: '$(WORKING_DIR)'
+                  commandOptions: '-input=false -auto-approve $(Pipeline.Workspace)/tfplan-$(targetEnv)/tfplan'
+                env:
+                  TF_VAR_subscription_id: '6126332c-5b2e-46d0-bdbb-a09be68684db'
+                  TF_VAR_tenant_id: '8cf435b8-9c7e-4a00-bed7-f47d80d5509b'

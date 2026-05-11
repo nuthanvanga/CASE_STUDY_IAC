@@ -23,9 +23,7 @@ E:\CaseStudy2\
 │   │   │   ├── main.tf
 │   │   │   ├── variables.tf
 │   │   │   ├── outputs.tf
-│   │   │   ├── providers.tf
-│   │   │   ├── backend.hcl.example
-│   │   │   └── terraform.auto.tfvars.example
+│   │   │   └── providers.tf
 │   │   ├── staging\                    (same shape as dev)
 │   │   └── prod\                       (same shape as dev)
 │   └── modules\                        # shared, env-agnostic
@@ -93,46 +91,19 @@ Each env (`dev`, `staging`, `prod`) is its own Terraform root under
 `terraform/modules/` via `../../modules/<name>`. State for each env
 lives in its own Azure storage account.
 
-`terraform.auto.tfvars` is auto-loaded — no `-var-file` flag needed.
 Env-specific defaults (CIDRs, SKUs, retention) are baked into each env's
-`variables.tf`; only the must-fill values like `subscription_id` /
-`tenant_id` go in `terraform.auto.tfvars`.
+`variables.tf`. The pipeline supplies the must-fill values
+(`subscription_id`, `tenant_id`) as `TF_VAR_*` env vars on the plan task —
+nothing env-specific is checked in.
 
-**Pipeline (Azure DevOps)** — the four backend coordinates
-(`resource_group_name`, `storage_account_name`, `container_name`, `key`)
-are pulled from a per-env bootstrap Key Vault `kv-tfstate-<env>` via the
-`AzureKeyVault@2` task at init time. Nothing about the state location is
-hard-coded in the pipeline YAML or in source control. The pipeline picks
-the env folder via the `targetEnv` parameter at queue time. See
-[`docs/deployment-guide.md` § 2](docs/deployment-guide.md) for the
-one-time bootstrap commands.
-
-**Local** — `cd` into the env folder, then either pull backend config
-from KV (recommended) or use a local `backend.hcl`:
-
-```
-cd terraform/envs/prod
-cp terraform.auto.tfvars.example terraform.auto.tfvars   # fill in real values
-
-# Option A: pull backend config from KV
-terraform init \
-  -backend-config="resource_group_name=$(az keyvault secret show --vault-name kv-tfstate-prod --name tfstate-rg        --query value -o tsv)" \
-  -backend-config="storage_account_name=$(az keyvault secret show --vault-name kv-tfstate-prod --name tfstate-sa        --query value -o tsv)" \
-  -backend-config="container_name=$(az keyvault secret show --vault-name kv-tfstate-prod --name tfstate-container --query value -o tsv)" \
-  -backend-config="key=$(az keyvault secret show --vault-name kv-tfstate-prod --name tfstate-key       --query value -o tsv)" \
-  -backend-config="use_oidc=true" -reconfigure
-
-# Option B: local backend.hcl
-cp backend.hcl.example backend.hcl
-terraform init -backend-config=backend.hcl -reconfigure
-
-# whole stack
-terraform plan
-terraform apply
-
-# single resource
-terraform apply -target=module.aks
-```
+**Pipeline (Azure DevOps)** — the Plan stage runs `terraform init` /
+`terraform plan -out=tfplan`, publishes the plan as a pipeline artifact,
+and the Apply stage (gated by environment approval on `main`) downloads
+the plan and runs `terraform apply tfplan` against the env's OIDC service
+connection (`azurerm-<env>-oidc`). The pipeline picks the env folder via
+the `targetEnv` parameter at queue time. Deployments are pipeline-only;
+running Terraform from a workstation against these state files is not
+supported.
 
 ### Per-env defaults
 
@@ -190,18 +161,19 @@ terraform apply -target=module.aks
 
 ## Quick start
 
-1. **Bootstrap state storage** for the env you want
-   (see [`docs/deployment-guide.md`](docs/deployment-guide.md) § 2).
+1. **Bootstrap state storage** for the env you want — create
+   `rg-tfstate-<env>` / `sttfstate<env>uaen` / container `tfstate` in the
+   target subscription.
 2. **Create the OIDC service connection** `azurerm-<env>-oidc` in Azure
-   DevOps (§ 3).
-3. **Fill in tfvars + backend.hcl** for the env:
-   ```
-   cp terraform/envs/prod.tfvars.example      terraform/envs/prod.tfvars
-   cp terraform/envs/prod.backend.hcl.example terraform/envs/prod.backend.hcl
-   ```
-4. **Run the Terraform pipeline** with `targetEnv = prod`.
-5. **Federate a UAMI** to the K8s ServiceAccount (§ 5).
-6. **Deploy `orders-api` with Helm** — pass UAMI client id, KV name,
+   DevOps and grant its SPN the roles it needs on the target subscription:
+   `Contributor`, `User Access Administrator` (for role assignments), and
+   `Storage Blob Data Owner` (required because the storage module disables
+   shared-key auth — see provider note in
+   [`terraform/envs/<env>/providers.tf`](terraform/envs/dev/providers.tf)).
+3. **Run the Terraform pipeline** with `targetEnv = <env>`. Plan runs on
+   PRs; Apply runs on `main` after the environment-approval gate.
+4. **Federate a UAMI** to the K8s ServiceAccount.
+5. **Deploy `orders-api` with Helm** — pass UAMI client id, KV name,
    tenant id, ACR repo + tag via `--set`:
    ```
    helm upgrade --install orders-api kubernetes/charts/orders-api \
@@ -214,7 +186,7 @@ terraform apply -target=module.aks
      --set image.tag=$IMAGE_TAG \
      --atomic --wait --timeout 5m
    ```
-7. **Run the .NET pipeline** with `targetEnv = prod` to deploy the API to
+6. **Run the .NET pipeline** with `targetEnv = prod` to deploy the API to
    App Service via staging slot + swap.
 
 ## Note on demonstrating against a live subscription

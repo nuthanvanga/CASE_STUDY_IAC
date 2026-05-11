@@ -169,7 +169,7 @@ stages:
             backendAzureRmStorageAccountName: 'sttfstateproduaen'
             backendAzureRmContainerName: 'tfstate'
             backendAzureRmKey: 'dev-uaen.tfstate'
-            workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform/envs/dev'
+            workingDirectory: '$(Build.SourcesDirectory)/Terraform/envs/dev'
 
         - task: TerraformTaskV4@4
           displayName: 'terraform plan'

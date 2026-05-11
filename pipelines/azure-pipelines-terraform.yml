@@ -185,10 +185,6 @@ stages:
         - publish: $(WORKING_DIR)/tfplan
           artifact: tfplan-$(targetEnv)
           displayName: 'publish tfplan'
-
-        - publish: $(WORKING_DIR)/plan.txt
-          artifact: plan-text
-          displayName: 'Publish plan summary'
 ###############################################################################
 # Apply stage - manual approval via environment, fetch backend, init, apply
 ###############################################################################

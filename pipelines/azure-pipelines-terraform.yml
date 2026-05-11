@@ -176,8 +176,9 @@ stages:
           inputs:
             provider: 'azurerm' 
             command: 'plan'
-            backendServiceArm: 'azurerm-dev-oidc'
-            workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform/envs/dev'
+            backendServiceArm: '$(SERVICE_CONNECTION)'
+            workingDirectory: '$(WORKING_DIR)/envs/dev'
+            commandOptions: '-out=tfplan -input=false'
 ###############################################################################
 # Apply stage - manual approval via environment, fetch backend, init, apply
 ###############################################################################

@@ -1,5 +1,6 @@
 ###############################################################################
-# Required - no defaults, must come from terraform.auto.tfvars
+# Required - no defaults. CI supplies these via TF_VAR_subscription_id /
+# TF_VAR_tenant_id env vars on the terraform plan task.
 ###############################################################################
 variable "subscription_id" {
   type        = string

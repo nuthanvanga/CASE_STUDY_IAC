@@ -1,9 +1,0 @@
-# LOCAL DEV ONLY. The Azure DevOps pipeline pulls these four values from the
-# bootstrap Key Vault `kv-tfstate-staging` (see docs/deployment-guide.md § 2).
-# Copy to backend.hcl and fill in real values.
-# terraform init -backend-config=backend.hcl
-resource_group_name  = "rg-tfstate-staging"
-storage_account_name = "sttfstatestguaen"
-container_name       = "tfstate"
-key                  = "stg-uaen.tfstate"
-use_oidc             = true

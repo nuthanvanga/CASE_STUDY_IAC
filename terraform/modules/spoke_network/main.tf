@@ -24,13 +24,26 @@ resource "azurerm_virtual_network" "spoke" {
 }
 
 ###############################################################################
+# Subnet CIDRs - derived from vnet_address_space[0] when not explicitly set.
+# Keeps each env's subnet plan in sync with whatever address space it picks.
+###############################################################################
+locals {
+  vnet_prefix = var.vnet_address_space[0]
+
+  aks_cidr    = coalesce(var.aks_subnet_cidr, cidrsubnet(local.vnet_prefix, 6, 0))
+  appsvc_cidr = coalesce(var.appsvc_subnet_cidr, cidrsubnet(local.vnet_prefix, 8, 4))
+  pe_cidr     = coalesce(var.pe_subnet_cidr, cidrsubnet(local.vnet_prefix, 8, 5))
+  appgw_cidr  = coalesce(var.appgw_subnet_cidr, cidrsubnet(local.vnet_prefix, 8, 6))
+}
+
+###############################################################################
 # Workload subnets
 ###############################################################################
 resource "azurerm_subnet" "aks" {
   name                 = "snet-aks"
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.spoke.name
-  address_prefixes     = [var.aks_subnet_cidr]
+  address_prefixes     = [local.aks_cidr]
   service_endpoints    = ["Microsoft.KeyVault", "Microsoft.ContainerRegistry", "Microsoft.Storage"]
 }
 
@@ -38,7 +51,7 @@ resource "azurerm_subnet" "appsvc" {
   name                 = "snet-appsvc"
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.spoke.name
-  address_prefixes     = [var.appsvc_subnet_cidr]
+  address_prefixes     = [local.appsvc_cidr]
 
   delegation {
     name = "appservice-delegation"
@@ -53,7 +66,7 @@ resource "azurerm_subnet" "pe" {
   name                 = "snet-private-endpoints"
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.spoke.name
-  address_prefixes     = [var.pe_subnet_cidr]
+  address_prefixes     = [local.pe_cidr]
 
   private_endpoint_network_policies_enabled = false
 }
@@ -62,7 +75,7 @@ resource "azurerm_subnet" "appgw" {
   name                 = "snet-appgw"
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.spoke.name
-  address_prefixes     = [var.appgw_subnet_cidr]
+  address_prefixes     = [local.appgw_cidr]
 }
 
 ###############################################################################

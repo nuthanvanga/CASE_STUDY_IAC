@@ -25,24 +25,33 @@ variable "vnet_address_space" {
   description = "Spoke VNet CIDR. Must NOT overlap the hub or any other spoke."
 }
 
+###############################################################################
+# Subnet CIDRs - leave null to auto-derive from vnet_address_space[0] using
+# cidrsubnet(). Defaults below produce, for a /16 spoke:
+#   aks    = first /22  (e.g. 10.20.0.0/22 within 10.20.0.0/16)
+#   appsvc = /24 at idx 4 (10.20.4.0/24)
+#   pe     = /24 at idx 5 (10.20.5.0/24)
+#   appgw  = /24 at idx 6 (10.20.6.0/24)
+# Override per-subnet only if you need a non-standard layout.
+###############################################################################
 variable "aks_subnet_cidr" {
   type    = string
-  default = "10.20.0.0/22"
+  default = null
 }
 
 variable "appsvc_subnet_cidr" {
   type    = string
-  default = "10.20.4.0/24"
+  default = null
 }
 
 variable "pe_subnet_cidr" {
   type    = string
-  default = "10.20.5.0/24"
+  default = null
 }
 
 variable "appgw_subnet_cidr" {
   type    = string
-  default = "10.20.6.0/24"
+  default = null
 }
 
 variable "enable_nat_gateway" {

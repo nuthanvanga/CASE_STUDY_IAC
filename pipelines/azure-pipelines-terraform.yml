@@ -178,7 +178,7 @@ stages:
             command: 'plan'
             environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
             workingDirectory: '$(WORKING_DIR)/envs/dev'
-            commandOptions: '-out=tfplan -input=false'
+            commandOptions: '-out=tfplan -input=false -detailed-exitcode'
 ###############################################################################
 # Apply stage - manual approval via environment, fetch backend, init, apply
 ###############################################################################

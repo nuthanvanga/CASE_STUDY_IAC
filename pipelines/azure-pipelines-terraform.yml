@@ -67,7 +67,7 @@ pr:
 
 variables:
   - name: TF_VERSION
-    value: '1.7.5'
+    value: '1.15.2'
   - name: TF_MODULES_ROOT
     value: '$(System.DefaultWorkingDirectory)/terraform'
   - name: targetEnv

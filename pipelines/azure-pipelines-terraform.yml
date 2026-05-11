@@ -176,7 +176,7 @@ stages:
           inputs:
             provider: 'azurerm' 
             command: 'plan'
-            backendServiceArm: '$(SERVICE_CONNECTION)'
+            environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
             workingDirectory: '$(WORKING_DIR)/envs/dev'
             commandOptions: '-out=tfplan -input=false'
 ###############################################################################

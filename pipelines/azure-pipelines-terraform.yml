@@ -165,10 +165,10 @@ stages:
             provider: 'azurerm' 
             command: 'init'
             backendServiceArm: 'azurerm-dev-oidc'
-            backendAzureRmResourceGroupName: '$(tfstate-rg)'
-            backendAzureRmStorageAccountName: '$(tfstate-sa)'
-            backendAzureRmContainerName: '$(tfstate-container)'
-            backendAzureRmKey: '$(tfstate-key)'
+            backendAzureRmResourceGroupName: 'rg-tfstate-dev'
+            backendAzureRmStorageAccountName: 'sttfstateproduaen'
+            backendAzureRmContainerName: 'tfstate'
+            backendAzureRmKey: 'dev-uaen.tfstate'
             workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform/envs/dev'
 
         - task: TerraformTaskV4@4

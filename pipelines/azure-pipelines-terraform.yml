@@ -67,7 +67,7 @@ pr:
 
 variables:
   - name: TF_VERSION
-    value: '1.15.2'
+    value: '1.9.2'
   - name: TF_MODULES_ROOT
     value: '$(System.DefaultWorkingDirectory)/terraform'
   - name: targetEnv
@@ -164,12 +164,12 @@ stages:
           inputs:
             provider: 'azurerm' 
             command: 'init'
-            backendServiceArm: 'azurerm-dev-oidc'
-            backendAzureRmResourceGroupName: 'rg-tfstate-dev'
-            backendAzureRmStorageAccountName: 'sttfstatedevuaen'
+            backendServiceArm: '$(SERVICE_CONNECTION)'
+            backendAzureRmResourceGroupName: 'rg-tfstate-$(targetEnv)'
+            backendAzureRmStorageAccountName: 'sttfstate$(targetEnv)uaen'
             backendAzureRmContainerName: 'tfstate'
-            backendAzureRmKey: 'dev-uaen.tfstate'
-            workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform/envs/dev'
+            backendAzureRmKey: '$(targetEnv)-uaen.tfstate'
+            workingDirectory: '$(WORKING_DIR)'
 
         - task: TerraformTaskV4@4
           displayName: 'terraform plan'

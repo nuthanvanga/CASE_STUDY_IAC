@@ -101,7 +101,7 @@ stages:
         - checkout: self
           fetchDepth: 1
 
-        - task: TerraformInstaller@0
+        - task: TerraformInstaller@1
           inputs:
             terraformVersion: '$(TF_VERSION)'
 
@@ -155,12 +155,12 @@ stages:
       steps:
         - checkout: self
 
-        - task: TerraformInstaller@0
+        - task: TerraformInstaller@1
           inputs:
             terraformVersion: '$(TF_VERSION)'
 
-        - task: TerraformTask@5
-          displayName: 'terraform init + plan'
+        - task: TerraformTaskV4@4
+          displayName: 'terraform init'
           inputs:
             provider: 'azurerm' 
             command: 'init'
@@ -169,9 +169,9 @@ stages:
             backendAzureRmStorageAccountName: 'sttfstatedevuaen'
             backendAzureRmContainerName: 'tfstate'
             backendAzureRmKey: 'dev-uaen.tfstate'
-            workingDirectory: '$(Build.SourcesDirectory)/Terraform/envs/dev'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform/envs/dev'
 
-        - task: TerraformTask@5
+        - task: TerraformTaskV4@4
           displayName: 'terraform plan'
           inputs:
             provider: 'azurerm' 

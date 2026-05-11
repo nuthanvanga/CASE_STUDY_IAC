@@ -179,6 +179,9 @@ stages:
             environmentServiceNameAzureRM: '$(SERVICE_CONNECTION)'
             workingDirectory: '$(WORKING_DIR)'
             commandOptions: '-out=tfplan -input=false'
+          env:
+            TF_VAR_subscription_id: '6126332c-5b2e-46d0-bdbb-a09be68684db'
+            TF_VAR_tenant_id: '8cf435b8-9c7e-4a00-bed7-f47d80d5509b'
 ###############################################################################
 # Apply stage - manual approval via environment, fetch backend, init, apply
 ###############################################################################

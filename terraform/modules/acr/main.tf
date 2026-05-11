@@ -63,11 +63,11 @@ resource "azurerm_private_endpoint" "acr" {
 }
 
 ###############################################################################
-# AcrPull role assignment to AKS kubelet identity (passed in)
+# AcrPull role assignments (typically AKS kubelet identity)
 ###############################################################################
-resource "azurerm_role_assignment" "aks_acrpull" {
-  count                = var.aks_kubelet_object_id == null ? 0 : 1
+resource "azurerm_role_assignment" "acrpull" {
+  for_each             = var.acrpull_principal_ids
   scope                = azurerm_container_registry.this.id
   role_definition_name = "AcrPull"
-  principal_id         = var.aks_kubelet_object_id
+  principal_id         = each.value
 }

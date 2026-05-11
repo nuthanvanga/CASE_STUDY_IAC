@@ -132,7 +132,9 @@ module "acr" {
   private_endpoint_subnet_id = module.spoke_network.pe_subnet_id
   private_dns_zone_id        = module.hub_network.private_dns_zone_ids["acr"]
   geo_replication_locations  = var.acr_geo_replication_locations
-  aks_kubelet_object_id      = module.aks.kubelet_object_id
+  acrpull_principal_ids = {
+    aks_kubelet = module.aks.kubelet_object_id
+  }
   tags                       = var.tags
 }
 

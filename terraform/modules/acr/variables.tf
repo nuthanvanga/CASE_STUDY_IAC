@@ -27,10 +27,15 @@ variable "geo_replication_locations" {
   description = "Optional list of secondary regions for geo-replication (e.g. ['uaecentral'])."
 }
 
-variable "aks_kubelet_object_id" {
-  type        = string
-  default     = null
-  description = "Object id of the AKS kubelet identity. AcrPull is granted when provided."
+variable "acrpull_principal_ids" {
+  type        = map(string)
+  default     = {}
+  description = <<-EOT
+    Map of stable key (e.g. "aks_kubelet") -> principal object id that
+    should receive AcrPull on this registry. Map (not list) so for_each
+    keys are known at plan time even when the principal ids are computed
+    from other modules.
+  EOT
 }
 
 variable "tags" {

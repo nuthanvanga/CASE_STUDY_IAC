@@ -132,9 +132,7 @@ module "acr" {
   private_endpoint_subnet_id = module.spoke_network.pe_subnet_id
   private_dns_zone_id        = module.hub_network.private_dns_zone_ids["acr"]
   geo_replication_locations  = var.acr_geo_replication_locations
-  acrpull_principal_ids = {
-    aks_kubelet = module.aks.kubelet_object_id
-  }
+  acrpull_principal_ids      = { aks_kubelet = module.aks.kubelet_object_id }
   tags                       = var.tags
 }
 
@@ -149,8 +147,6 @@ module "keyvault" {
   private_endpoint_subnet_id = module.spoke_network.pe_subnet_id
   private_dns_zone_id        = module.hub_network.private_dns_zone_ids["keyvault"]
   kv_admin_principal_ids     = var.kv_admin_principal_ids
-  # Map keys are static (known at plan); values can be computed/unknown.
-  # Staging slot is always created (app_service var.create_staging_slot defaults to true).
   kv_secret_user_principal_ids = {
     aks                = module.aks.kv_secrets_provider_object_id
     appservice         = module.appservice.principal_id
@@ -195,8 +191,6 @@ module "storage" {
   enable_queue_endpoint      = var.storage_enable_queue_endpoint
   enable_table_endpoint      = var.storage_enable_table_endpoint
   enable_dfs_endpoint        = var.storage_enable_dfs_endpoint
-  # Map keys are static (known at plan); values can be computed/unknown.
-  # Staging slot is always created.
   blob_data_contributor_principal_ids = {
     appservice         = module.appservice.principal_id
     appservice_staging = module.appservice.staging_principal_id

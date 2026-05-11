@@ -26,9 +26,14 @@ variable "kv_admin_principal_ids" {
 }
 
 variable "kv_secret_user_principal_ids" {
-  type        = list(string)
-  default     = []
-  description = "Workload identities that should receive Key Vault Secrets User."
+  type        = map(string)
+  default     = {}
+  description = <<-EOT
+    Workload identities that should receive Key Vault Secrets User.
+    Map of stable key (e.g. "aks", "appservice") -> principal object id.
+    Using a map (not a list) so for_each keys are known at plan time even
+    when the principal ids are computed from other modules.
+  EOT
 }
 
 variable "allowed_ip_ranges" {

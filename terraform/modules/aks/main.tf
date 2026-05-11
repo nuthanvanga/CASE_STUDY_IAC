@@ -148,7 +148,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "user" {
 # Diagnostic settings
 ###############################################################################
 resource "azurerm_monitor_diagnostic_setting" "aks" {
-  count                      = var.log_analytics_workspace_id == null ? 0 : 1
+  count                      = var.enable_diagnostics ? 1 : 0
   name                       = "${var.cluster_name}-diag"
   target_resource_id         = azurerm_kubernetes_cluster.this.id
   log_analytics_workspace_id = var.log_analytics_workspace_id

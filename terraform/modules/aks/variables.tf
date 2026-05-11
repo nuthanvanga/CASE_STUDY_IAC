@@ -79,6 +79,17 @@ variable "log_analytics_workspace_id" {
   default = null
 }
 
+variable "enable_diagnostics" {
+  type        = bool
+  default     = true
+  description = <<-EOT
+    Whether to create the diagnostic setting that ships logs/metrics to
+    Log Analytics. Gated by an explicit boolean (rather than a null check
+    on log_analytics_workspace_id) so the count is known at plan time even
+    when the workspace id is computed.
+  EOT
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

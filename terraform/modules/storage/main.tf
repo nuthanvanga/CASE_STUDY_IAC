@@ -90,24 +90,24 @@ resource "azurerm_private_endpoint" "this" {
 # Optional Storage Blob Data Contributor / Reader assignments for workloads
 ###############################################################################
 resource "azurerm_role_assignment" "blob_contributor" {
-  count                = length(var.blob_data_contributor_principal_ids)
+  for_each             = var.blob_data_contributor_principal_ids
   scope                = azurerm_storage_account.this.id
   role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = var.blob_data_contributor_principal_ids[count.index]
+  principal_id         = each.value
 }
 
 resource "azurerm_role_assignment" "blob_reader" {
-  count                = length(var.blob_data_reader_principal_ids)
+  for_each             = var.blob_data_reader_principal_ids
   scope                = azurerm_storage_account.this.id
   role_definition_name = "Storage Blob Data Reader"
-  principal_id         = var.blob_data_reader_principal_ids[count.index]
+  principal_id         = each.value
 }
 
 ###############################################################################
 # Diagnostic settings
 ###############################################################################
 resource "azurerm_monitor_diagnostic_setting" "account" {
-  count                      = var.log_analytics_workspace_id == null ? 0 : 1
+  count                      = var.enable_diagnostics ? 1 : 0
   name                       = "${var.name}-diag"
   target_resource_id         = azurerm_storage_account.this.id
   log_analytics_workspace_id = var.log_analytics_workspace_id

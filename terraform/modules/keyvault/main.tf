@@ -65,8 +65,8 @@ resource "azurerm_role_assignment" "deployer_admin" {
 
 # Workloads (AKS/AppService) get Key Vault Secrets User
 resource "azurerm_role_assignment" "secrets_user" {
-  count                = length(var.kv_secret_user_principal_ids)
+  for_each             = var.kv_secret_user_principal_ids
   scope                = azurerm_key_vault.this.id
   role_definition_name = "Key Vault Secrets User"
-  principal_id         = var.kv_secret_user_principal_ids[count.index]
+  principal_id         = each.value
 }

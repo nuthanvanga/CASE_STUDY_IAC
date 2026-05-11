@@ -147,11 +147,13 @@ module "keyvault" {
   private_endpoint_subnet_id = module.spoke_network.pe_subnet_id
   private_dns_zone_id        = module.hub_network.private_dns_zone_ids["keyvault"]
   kv_admin_principal_ids     = var.kv_admin_principal_ids
-  kv_secret_user_principal_ids = compact([
-    module.aks.kv_secrets_provider_object_id,
-    module.appservice.principal_id,
-    module.appservice.staging_principal_id,
-  ])
+  # Map keys are static (known at plan); values can be computed/unknown.
+  # Staging slot is always created (app_service var.create_staging_slot defaults to true).
+  kv_secret_user_principal_ids = {
+    aks                = module.aks.kv_secrets_provider_object_id
+    appservice         = module.appservice.principal_id
+    appservice_staging = module.appservice.staging_principal_id
+  }
   tags = var.tags
 }
 
@@ -191,10 +193,12 @@ module "storage" {
   enable_queue_endpoint      = var.storage_enable_queue_endpoint
   enable_table_endpoint      = var.storage_enable_table_endpoint
   enable_dfs_endpoint        = var.storage_enable_dfs_endpoint
-  blob_data_contributor_principal_ids = compact([
-    module.appservice.principal_id,
-    module.appservice.staging_principal_id,
-  ])
+  # Map keys are static (known at plan); values can be computed/unknown.
+  # Staging slot is always created.
+  blob_data_contributor_principal_ids = {
+    appservice         = module.appservice.principal_id
+    appservice_staging = module.appservice.staging_principal_id
+  }
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
   tags                       = var.tags
 }
